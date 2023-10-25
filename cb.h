@@ -109,18 +109,18 @@ typedef int cb_proc_t;
 #    define cb_da_empty(da)               ((da)->count == 0 || (da)->items == NULL)
 #    define cb_da_foreach(da, type, ...)  for (size_t idx = 0; idx < (da)->count; ++idx) { type *item = &(da)->items[idx]; __VA_ARGS__; }
 
-#    define cb_da_append(da, item)  do { if ((da)->count >= (da)->capacity) { (da)->capacity = (da)->capacity == 0 ? CB_DA_INIT_CAP : (da)->capacity * 2; (da)->items    = CB_REALLOC((da)->items, (da)->capacity * sizeof(*(da)->items)); CB_ASSERT_ALLOC((da)->items);}(da)->items[(da)->count++] = (item); } while (0)
+#    define cb_da_append(da, type, item)  do { if ((da)->count >= (da)->capacity) { (da)->capacity = (da)->capacity == 0 ? CB_DA_INIT_CAP : (da)->capacity * 2; (da)->items    = (type)CB_REALLOC((da)->items, (da)->capacity * sizeof(*(da)->items)); CB_ASSERT_ALLOC((da)->items);}(da)->items[(da)->count++] = (item); } while (0)
 #    define cb_da_free(da)          do { CB_FREE((da).items); (da).capacity = 0; (da).count = 0; } while(0)
 // Append several items to a dynamic array
-#    define cb_da_append_many(da, new_items, new_items_count)                                                                                         \
+#    define cb_da_append_many(da, type, new_items, new_items_count)                                                                                         \
         do {                                                                                                                                          \
             if ((da)->count + new_items_count > (da)->capacity) {                                                                                     \
                 if ((da)->capacity == 0) (da)->capacity = CB_DA_INIT_CAP; while ((da)->count + new_items_count > (da)->capacity) (da)->capacity *= 2; \
-                (da)->items = CB_REALLOC((da)->items, (da)->capacity * sizeof(*(da)->items)); CB_ASSERT_ALLOC((da)->items);                           \
+                (da)->items = (type)CB_REALLOC((da)->items, (da)->capacity * sizeof(*(da)->items)); CB_ASSERT_ALLOC((da)->items);                           \
             }                                                                                                                                         \
             memcpy((da)->items + (da)->count, new_items, new_items_count * sizeof(*(da)->items)); (da)->count += new_items_count;                     \
         } while (0)
-#    define cb_return_defer(value)  do { result = (value); goto defer; } while (0)
+#    define cb_return_defer(value)  { result = (value); goto defer; }
 #    define NOT_IMPLEMENTED         CB_BAIL_ERROR(exit(1), "Not Implemented - %s", __PRETTY_FUNCTION__)
 
 // TODO: add MinGW support
@@ -137,33 +137,33 @@ typedef int cb_proc_t;
 #            define CB_REBUILD_ARGS(binary_path, source_path) "cc", "-o", binary_path, source_path
 #        endif
 #    endif
-#    define CB_REBUILD_SELF(argc, argv)                                                     \
-        do {                                                                                \
-            const char *source_path = __FILE__;                                             \
-            assert(argc >= 1);                                                              \
-            const char *binary_path       = argv[0];                                        \
-            int         rebuild_is_needed = cb_needs_rebuild(binary_path, &source_path, 1); \
-            if (rebuild_is_needed < 0) exit(1);                                             \
-            if (rebuild_is_needed) {                                                        \
-                cb_str_builder_t sb = {0};                                                  \
-                cb_sb_append_cstr(&sb, binary_path);                                        \
-                cb_sb_append_cstr(&sb, ".old");                                             \
-                cb_sb_append_null(&sb);                                                     \
-                                                                                            \
-                if (!cb_rename(binary_path, sb.items)) exit(1);                             \
-                cb_cmd_t rebuild = {0};                                                     \
-                cb_cmd_append(&rebuild, CB_REBUILD_ARGS(binary_path, source_path));         \
-                bool rebuild_succeeded = cb_cmd_run_sync(rebuild);                          \
-                cb_cmd_free(rebuild);                                                       \
-                if (!rebuild_succeeded) {                                                   \
-                    cb_rename(sb.items, binary_path);                                       \
-                    exit(1);                                                                \
-                }                                                                           \
-                cb_cmd_t cmd = {0};                                                         \
-                cb_da_append_many(&cmd, argv, argc);                                        \
-                if (!cb_cmd_run_sync(cmd)) exit(1);                                         \
-                exit(0);                                                                    \
-            }                                                                               \
+#    define CB_REBUILD_SELF(argc, argv, ...)                                                         \
+        do {                                                                                         \
+            assert(argc >= 1);                                                                       \
+            const char* source_path = __FILE__;                                                      \
+            const char* binary_path       = argv[0];                                                 \
+            const char* sources[] = {source_path, __VA_ARGS__};                                      \
+            int         rebuild_is_needed = cb_needs_rebuild(binary_path, sources, ARRLEN(sources)); \
+            if (rebuild_is_needed < 0) exit(1);                                                      \
+            if (rebuild_is_needed) {                                                                 \
+                cb_str_builder_t sb = {0};                                                           \
+                cb_sb_append_cstr(&sb, binary_path);                                                 \
+                cb_sb_append_cstr(&sb, ".old");                                                      \
+                cb_sb_append_null(&sb);                                                              \
+                if (!cb_rename_path(binary_path, sb.items)) exit(1);                                 \
+                cb_cmd_t rebuild = {0};                                                              \
+                cb_cmd_append(&rebuild, CB_REBUILD_ARGS(binary_path, source_path));                  \
+                bool rebuild_succeeded = cb_cmd_run_sync(rebuild);                                   \
+                cb_cmd_free(rebuild);                                                                \
+                if (!rebuild_succeeded) {                                                            \
+                    cb_rename_path(sb.items, binary_path);                                           \
+                    exit(1);                                                                         \
+                }                                                                                    \
+                cb_cmd_t cmd = {0};                                                                  \
+                cb_da_append_many(&cmd,const char **, argv, argc);                                   \
+                if (!cb_cmd_run_sync(cmd)) exit(1);                                                  \
+                exit(0);                                                                             \
+            }                                                                                        \
         } while (0)
 // clang-format on
 
@@ -171,8 +171,16 @@ typedef enum { CB_ERR, CB_OK, CB_FAIL } cb_status_t;
 typedef enum { CB_LOG_NONE, CB_LOG_INFO, CB_LOG_WARNING, CB_LOG_ERROR, CB_LOG_FATAL, CB_LOG_LEVEL_MAX } cb_log_level_t;
 typedef enum { CB_FILE_TYPE_ERROR = -1, CB_FILE_REGULAR = 0, CB_FILE_DIRECTORY, CB_FILE_SYMLINK, CB_FILE_OTHER } cb_file_type_t;
 
+typedef enum {
+    CB_SUBCMD_NOOP,
+    CB_SUBCMD_BUILD,
+    CB_SUBCMD_CONFIG,
+    CB_SUBCMD_TESTS,
+    CB_SUBCMD_CLEAN,
+    CB_SUBCMD_INSTALL,
+    CB_SUBCMD_MAX,
+} cb_subcmd_t;
 // clang-format off
-typedef enum { CB_SUBCMD_NOOP,      CB_SUBCMD_BUILD,            CB_SUBCMD_CONFIG,           CB_SUBCMD_TESTS,    CB_SUBCMD_CLEAN, CB_SUBCMD_MAX } cb_subcmd_t;
 typedef enum { CB_BUILD_TYPE_DEBUG, CB_BUILD_TYPE_RELEASE,      CB_BUILD_TYPE_RELEASEDEBUG, CB_BUILD_TYPE_MAX                   } cb_build_t;
 typedef enum { CB_PLATFORM_UNKNOWN, CB_PLATFORM_WINDOWS,        CB_PLATFORM_MACOS,          CB_PLATFORM_UNIX,   CB_PLATFORM_MAX } cb_platform_t;
 typedef enum { CB_ARCH_UNKNOWN,     CB_ARCH_X64,                CB_ARCH_X86, CB_ARCH_ARM64, CB_ARCH_ARM32,      CB_ARCH_MAX     } cb_arch_t;
@@ -189,13 +197,14 @@ typedef enum {
 // clang-format on
 
 CB_FNDEF void cb_log(cb_log_level_t level, const char *fmt, ...) __attribute__((__format__(__printf__, 2, 3)));
-// It is an equivalent of shift command from bash. It basically pops a command line
-// argument from the beginning.
+// It is an equivalent of shift command from bash. It basically pops a command
+// line argument from the beginning.
 
 typedef struct cb_path_t        cb_path_t;
 typedef struct cb_str_builder_t cb_str_builder_t;
 typedef struct cb_procs_t       cb_procs_t;
-// A command - the main workhorse of Cb. Cb is all about building commands an running them
+// A command - the main workhorse of Cb. Cb is all about building commands an
+// running them
 typedef struct cb_cmd_t        cb_cmd_t;
 typedef struct cb_temp_alloc_t cb_temp_alloc_t;
 typedef struct cb_strview_t    cb_strview_t;
@@ -233,10 +242,17 @@ CB_FNDEF bool         cb_path_to_absolute_path(cb_path_t *path);
 
 /// os operation /////////////////////////////////////////////
 CB_FNDEF cb_file_type_t cb_get_file_type(const char *path);
-CB_FNDEF bool           cb_mkdir_if_not_exists(const char *path);
-CB_FNDEF bool           cb_remove_dir_if_not_exists(const char *path);
-CB_FNDEF bool           cb_rename(const char *old_path, const char *new_path);
+CB_FNDEF bool           cb_mkdir_if_not_exists(const char *path, bool recursive);
+CB_FNDEF bool           cb_remove_dir_if_exists(const char *path);
+CB_FNDEF bool           cb_rename_path(const char *old_path, const char *new_path);
+CB_FNDEF bool           cb_copy_file(const char *dest_path, const char *src_path);
 CB_FNDEF bool           cb_current_dir(cb_path_t *out_path, char *optional_append_path);
+CB_FNDEF bool           cb_home_dir(cb_path_t *out_path, char *optional_append_path);
+#    if defined(CB_WINDOWS)
+#        define cb_chmod(...)
+#    else
+CB_FNDEF bool      cb_chmod(const char *file, mode_t octal_mode);
+#    endif
 typedef bool (*on_dirent_cb)(cb_file_type_t ftype, cb_path_t *, void *args);
 CB_FNDEF bool cb_walkdir(const char *parent, bool recursive, on_dirent_cb on_dirent_calback, void *args);
 
@@ -258,9 +274,9 @@ struct cb_str_builder_t {
     char  *items;
 };
 // clang-format off
-#    define cb_sb_append_buf(sb, buf, size) cb_da_append_many(sb, buf, size)
-#    define cb_sb_append_cstr(sb, cstr)  do {const char *s = (cstr); size_t n = strlen(s); cb_da_append_many(sb, s, n); } while (0)
-#    define cb_sb_append_null(sb) cb_da_append_many(sb, "", 1)
+#    define cb_sb_append_buf(sb, buf, size) cb_da_append_many(sb, char*, buf, size)
+#    define cb_sb_append_cstr(sb, cstr)  do {const char *s = (cstr); size_t n = strlen(s); cb_da_append_many(sb, char*, s, n); } while (0)
+#    define cb_sb_append_null(sb) cb_da_append_many(sb, char*, "", 1)
 #    define cb_sb_free(sb)        CB_FREE((sb).items)
 // clang-format on
 
@@ -282,8 +298,9 @@ struct cb_cmd_t {
     const char **items;
 };
 
-#    define cb_cmd_append(cmd, ...) cb_da_append_many(cmd, ((const char *[]){__VA_ARGS__}), (sizeof((const char *[]){__VA_ARGS__}) / sizeof(const char *)))
-#    define cb_cmd_free(cmd)        CB_FREE(cmd.items)
+#    define cb_cmd_append(cmd, ...) \
+        cb_da_append_many(cmd, const char **, ((const char *[]){__VA_ARGS__}), (sizeof((const char *[]){__VA_ARGS__}) / sizeof(const char *)))
+#    define cb_cmd_free(cmd) CB_FREE(cmd.items)
 CB_FNDEF cb_proc_t   cb_cmd_run_async(cb_cmd_t cmd);
 CB_FNDEF bool        cb_cmd_run_sync(cb_cmd_t cmd);
 CB_FNDEF cb_status_t cb_popen_stdout(const char *cmd, cb_str_builder_t *stdout_content);
@@ -326,8 +343,8 @@ CB_FNDEF const char  *cb_sv_to_cstr(cb_strview_t sv);
 /// cb_set_t /////////////////////////////////////////////
 ///
 typedef struct {
-    cb_strview_t item;
     int64_t      hash;
+    cb_strview_t item;
 } cb_set_item_t;
 struct cb_set_t {
     size_t         capacity;
@@ -371,7 +388,12 @@ struct cb_config_t {
     cb_path_t     compiler_path;
     cb_path_t     config_path;
     cb_path_t     targets_path;
+
+    cb_path_t     install_prefix;
+    cb_path_t     bin_install_dir;
+    cb_path_t     lib_install_dir;
 };
+CB_FNDEF cb_status_t cb_config_set_install_prefix(cb_config_t *cfg, cb_path_t prefix);
 
 /// cb_target_t /////////////////////////////////////////////
 typedef struct {
@@ -414,6 +436,8 @@ struct cb_t {
 
     cb_callback_fn on_pre_build;
     cb_callback_fn on_post_build;
+    cb_callback_fn on_pre_install;
+    cb_callback_fn on_post_install;
 };
 // init cb_t returning pointer of the `cb_t`, if error, return `NULL`
 // `cb_t` is created in head, it should `cb_deinit` after using it
@@ -430,6 +454,8 @@ CB_FNDEF cb_target_t *cb_create_target_impl(cb_t *cb, cb_strview_t name, cb_targ
 
 CB_FNDEF void         cb_add_on_pre_build_callback(cb_t *cb, cb_callback_fn callback);
 CB_FNDEF void         cb_add_on_post_build_callback(cb_t *cb, cb_callback_fn callback);
+CB_FNDEF void         cb_add_on_pre_install_callback(cb_t *cb, cb_callback_fn callback);
+CB_FNDEF void         cb_add_on_post_install_callback(cb_t *cb, cb_callback_fn callback);
 CB_FNDEF cb_target_t *cb_create_target_pkgconf(cb_t *cb, cb_strview_t name);
 
 // user self implementation function for configuring build
@@ -488,9 +514,12 @@ static inline void cb_config_display(void) {
     printf("config.build_artifact_path = '%*s'" CB_LINE_END, SVArg(g_cfg.build_artifact_path));
     printf("config.compiler_path       = '%*s'" CB_LINE_END, SVArg(g_cfg.compiler_path));
     printf("config.config_path         = '%*s'" CB_LINE_END, SVArg(g_cfg.config_path));
+    printf("config.install_prefix      = '%*s'" CB_LINE_END, SVArg(g_cfg.install_prefix));
+    printf("config.bin_install_dir     = '%*s'" CB_LINE_END, SVArg(g_cfg.bin_install_dir));
+    printf("config.lib_install_dir     = '%*s'" CB_LINE_END, SVArg(g_cfg.lib_install_dir));
 }
 
-static inline char *cb_config_get_ext(cb_target_type_t type) {
+static inline const char *cb_config_get_ext(cb_target_type_t type) {
     switch (type) {
         case CB_TARGET_TYPE_STATIC_LIB: return "a";
         case CB_TARGET_TYPE_DYNAMIC_LIB: return (g_cfg.platform == CB_PLATFORM_WINDOWS) ? "dll" : "so";
@@ -511,12 +540,13 @@ static inline bool cb_bin_read_header(FILE *fp) {
 #    define cb_bin_read_prim(fp, prim)  fread(&(prim), 1, sizeof(prim), fp)
 #    define cb_bin_read_path(fp, path)  (cb_bin_read_prim(fp, (path)->count), fread((path)->data, 1, (path)->count, fp))
 #    define cb_bin_write_path(fp, path) (cb_bin_write_prim(fp, (path)->count), fwrite((path)->data, 1, (path)->count, fp))
-#    define cb_bin_read_sv(fp, sv)      (cb_bin_read_prim(fp, (sv)->count), (sv)->data = cb_temp_alloc((sv)->count + 1), fread((sv)->data, (sv)->count, 1, fp))
-#    define cb_bin_write_sv(fp, sv)     (cb_bin_write_prim(fp, (sv)->count), fwrite((sv)->data, (sv)->count, 1, fp))
+#    define cb_bin_read_sv(fp, sv) \
+        (cb_bin_read_prim(fp, (sv)->count), (sv)->data = (char *)cb_temp_alloc((sv)->count + 1), fread((sv)->data, (sv)->count, 1, fp))
+#    define cb_bin_write_sv(fp, sv) (cb_bin_write_prim(fp, (sv)->count), fwrite((sv)->data, (sv)->count, 1, fp))
 
 static inline cb_status_t cb_bin_read_set(FILE *fp, cb_set_t *set) {
     cb_bin_read_prim(fp, set->count);
-    set->items = CB_REALLOC(NULL, set->count * sizeof(cb_set_item_t));
+    set->items = (cb_set_item_t *)CB_REALLOC(NULL, set->count * sizeof(cb_set_item_t));
     CB_ASSERT_ALLOC(set->items);
     set->capacity = set->count;
     for (size_t i = 0; i < set->count; ++i) {
@@ -617,16 +647,30 @@ bool cb_path_to_absolute_path(cb_path_t *path) {
 }
 
 /// impl os operation /////////////////////////////////////////////
-bool cb_mkdir_if_not_exists(const char *path) {
-    if (mkdir(path, 0755) < 0) {
-        if (errno == EEXIST) return true;
-        return false;
+bool cb_mkdir_if_not_exists(const char *path, bool recursive) {
+    if (!recursive) {
+        if (mkdir(path, 0755) < 0) {
+            if (EEXIST == errno || errno == ENOENT) return true;
+            CB_BAIL_ERROR(return false, "Failed to create directory: %s - %s", path, strerror(errno));
+        }
+        CB_INFO("created directory `%s`", path);
+    } else {
+        char *p = NULL;
+        for (p = (char *)strchr(path + 1, '/'); p; p = strchr(p + 1, '/')) {
+            *p = '\0';
+            if (!cb_mkdir_if_not_exists(path, false)) {
+                return false;
+            } else {
+                *p = '/';
+                continue;
+            }
+            *p = '/';
+        }
     }
-    CB_INFO("created directory `%s`", path);
     return true;
 }
 
-bool cb_remove_dir_if_not_exists(const char *dirpath) {
+bool cb_remove_dir_if_exists(const char *dirpath) {
     bool result = true;
     DIR *dir    = opendir(dirpath);
     if (dir == NULL) CB_BAIL_ERROR(return false, "Could not open directory %s: %s", dirpath, strerror(errno));
@@ -639,7 +683,7 @@ bool cb_remove_dir_if_not_exists(const char *dirpath) {
         path.count = snprintf(path.data, sizeof(path.data), "%s/%s", dirpath, ent->d_name);
         d_type     = cb_get_file_type(path.data);
         if (d_type == CB_FILE_TYPE_ERROR) continue;
-        if (d_type == CB_FILE_DIRECTORY) result &= cb_remove_dir_if_not_exists(path.data);
+        if (d_type == CB_FILE_DIRECTORY) result &= cb_remove_dir_if_exists(path.data);
         if (unlink(path.data) == 0) {
             CB_INFO("Removed file: '%*s'", SVArg(path));
         } else {
@@ -656,7 +700,7 @@ bool cb_remove_dir_if_not_exists(const char *dirpath) {
     return result;
 }
 
-bool cb_rename(const char *old_path, const char *new_path) {
+bool cb_rename_path(const char *old_path, const char *new_path) {
     CB_INFO("renaming %s -> %s", old_path, new_path);
 #    ifdef CB_WINDOWS
     if (!MoveFileEx(old_path, new_path, MOVEFILE_REPLACE_EXISTING))
@@ -666,12 +710,91 @@ bool cb_rename(const char *old_path, const char *new_path) {
 #    endif  // CB_WINDOWS
     return true;
 }
+
+bool cb_copy_file(const char *dst_path, const char *src_path) {
+    CB_INFO("Copying file from: %s => %s", src_path, dst_path);
+#    ifdef CB_WINDOWS
+    if (!CopyFile(src_path, dst_path, FALSE)) CB_BAIL_ERROR(return false, "Could not copy file: %lu", GetLastError());
+    return true;
+#    else
+    bool   result   = true;
+    int    src_fd   = -1;
+    int    dst_fd   = -1;
+
+    size_t buf_size = 32 * 1024;
+    char  *buf      = (char *)CB_REALLOC(NULL, buf_size);
+    CB_ASSERT_ALLOC(buf);
+
+    src_fd = open(src_path, O_RDONLY);
+    if (src_fd < 0) CB_BAIL_ERROR(cb_return_defer(false), "Could not open file %s: %s", src_path, strerror(errno));
+
+    struct stat src_stat;
+    if (fstat(src_fd, &src_stat) < 0) CB_BAIL_ERROR(cb_return_defer(false), "Could not get mode of file %s: %s", src_path, strerror(errno));
+
+    if (unlink(dst_path) < 0) CB_BAIL_ERROR(cb_return_defer(false), "Could unlink file %s: %s", dst_path, strerror(errno));
+    dst_fd = open(dst_path, O_CREAT | O_TRUNC | O_WRONLY, src_stat.st_mode);
+    if (dst_fd < 0) CB_BAIL_ERROR(cb_return_defer(false), "Could not create file %s: %s", dst_path, strerror(errno));
+
+    for (;;) {
+        ssize_t n = read(src_fd, buf, buf_size);
+        if (n == 0) break;
+        if (n < 0) CB_BAIL_ERROR(cb_return_defer(false), "Could not read from file %s: %s", src_path, strerror(errno));
+
+        char *buf2 = buf;
+        while (n > 0) {
+            ssize_t m = write(dst_fd, buf2, n);
+            if (m < 0) CB_BAIL_ERROR(cb_return_defer(false), "Could not write to file %s: %s", dst_path, strerror(errno));
+            n -= m;
+            buf2 += m;
+        }
+    }
+
+defer:
+    free(buf);
+    close(src_fd);
+    close(dst_fd);
+    return result;
+#    endif
+}
 bool cb_current_dir(cb_path_t *out_path, char *optional_append_path) {
     memset(out_path->data, 0, sizeof(out_path->data));
     if (getcwd(out_path->data, sizeof(out_path->data)) == NULL)
         CB_BAIL_ERROR(return false, "failed to get CWD (current working directory) - %s", strerror(errno));
     out_path->count = strlen(out_path->data);
     return (optional_append_path != NULL) ? (cb_path_append_cstr(out_path, optional_append_path) == CB_OK) : true;
+}
+
+bool cb_home_dir(cb_path_t *out_path, char *optional_append_path) {
+    // TODO: implement windows equivalent
+    char *home = NULL;
+#    if !defined(CB_WINDOWS)
+    if ((home = getenv("HOME")) == NULL) CB_BAIL_ERROR(return false, "Failed to get Home directory!");
+#    else
+    if ((home = getenv("USERPROFILE")) == NULL) {
+        CB_ERROR(
+            "Failed to get env `USERPROFILE` try to get env `HOMEDRIVE` and "
+            "`HOMEPATH`");
+        char *drive = getenv("HOMEDRIVE");
+        char *path  = getenv("HOMEPATH");
+        if ((drive == NULL) || (path == NULL))
+            CB_BAIL_ERROR(return false,
+                                 "Failed to get env `HOMEDRIVE` or `HOMEPATH` "
+                                 "to get fullpath to home directory");
+        *out_path = cb_path(drive);
+        cb_path_append_cstr(out_path, path);
+        return (optional_append_path != NULL) ? (cb_path_append_cstr(out_path, optional_append_path) == CB_OK) : true;
+    }
+#    endif  // CB_WINDOWS
+    *out_path = cb_path(home);
+    return (optional_append_path != NULL) ? (cb_path_append_cstr(out_path, optional_append_path) == CB_OK) : true;
+}
+
+bool cb_chmod(const char *file, mode_t octal_mode) {
+    if (chmod(file, octal_mode) == 0) {
+        CB_INFO("Chmod a file: %s as mode: %o", file, octal_mode);
+        return true;
+    }
+    CB_BAIL_ERROR(return false, "Failed to get `chmod` a file: %s - %s", file, strerror(errno));
 }
 
 bool cb_walkdir(const char *parent, bool recursive, on_dirent_cb on_dirent_calback, void *args) {
@@ -714,13 +837,15 @@ int cb_needs_rebuild(const char *output_path, const char **input_paths, size_t i
     for (size_t i = 0; i < input_paths_count; ++i) {
         const char *input_path    = input_paths[i];
         HANDLE      input_path_fd = CreateFile(input_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
-        // NOTE: non-existing input is an error cause it is needed for building in the first place
+        // NOTE: non-existing input is an error cause it is needed for building
+        // in the first place
         if (input_path_fd == INVALID_HANDLE_VALUE) CB_BAIL_ERROR(return -1, "Could not open file %s: %lu", input_path, GetLastError());
         FILETIME input_path_time;
         bSuccess = GetFileTime(input_path_fd, NULL, NULL, &input_path_time);
         CloseHandle(input_path_fd);
         if (!bSuccess) CB_BAIL_ERROR(return -1, "Could not get time of %s: %lu", input_path, GetLastError());
-        // NOTE: if even a single input_path is fresher than output_path that's 100% rebuild
+        // NOTE: if even a single input_path is fresher than output_path that's
+        // 100% rebuild
         if (CompareFileTime(&input_path_time, &output_path_time) == 1) return 1;
     }
 
@@ -738,7 +863,8 @@ int cb_needs_rebuild(const char *output_path, const char **input_paths, size_t i
         const char *input_path = input_paths[i];
         if (stat(input_path, &statbuf) < 0) CB_BAIL_ERROR(return -1, "could not stat %s: %s", input_path, strerror(errno));
         int input_path_time = statbuf.st_mtime;
-        // NOTE: if even a single input_path is fresher than output_path that's 100% rebuild
+        // NOTE: if even a single input_path is fresher than output_path that's
+        // 100% rebuild
         if (input_path_time > output_path_time) return 1;
     }
     return 0;
@@ -838,7 +964,7 @@ cb_proc_t cb_cmd_run_async(cb_cmd_t cmd) {
         // NOTE: This leaks a bit of memory in the child process.
         // But do we actually care? It's a one off leak anyway...
         cb_cmd_t cmd_null = {0};
-        cb_da_append_many(&cmd_null, cmd.items, cmd.count);
+        cb_da_append_many(&cmd_null, const char **, cmd.items, cmd.count);
         cb_cmd_append(&cmd_null, NULL);
 
         if (execvp(cmd.items[0], (char *const *)cmd_null.items) < 0) CB_BAIL_ERROR(exit(1), "Could not exec child process: %s", strerror(errno));
@@ -890,7 +1016,7 @@ cb_status_t cb_popen_stdout(const char *cmd, cb_str_builder_t *stdout_content) {
 #    else
     int   stdout_pipe[2];
     pid_t pid_proc;
-    if (pipe(stdout_pipe) == -1) CB_BAIL_ERROR(cb_return_defer(CB_ERR), "Error creating pipes on Linux")
+    if (pipe(stdout_pipe) == -1) CB_BAIL_ERROR(return CB_ERR, "Error creating pipes on Linux")
     if ((pid_proc = fork()) < 0) CB_BAIL_ERROR(cb_return_defer(CB_ERR), "Error forking process on Linux");
 
     if (pid_proc == 0) {
@@ -899,19 +1025,19 @@ cb_status_t cb_popen_stdout(const char *cmd, cb_str_builder_t *stdout_content) {
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
 
-        char *const cmds[] = {"/bin/sh", "-c", (char *const)cmd, NULL};
+        char *const cmds[] = {(char *const)"/bin/sh", (char *const)"-c", (char *const)cmd, NULL};
         if (execvp(cmds[0], cmds) < 0) CB_BAIL_ERROR(exit(EXIT_FAILURE), "Could not exec child process: %s", strerror(errno));
         exit(EXIT_SUCCESS);
     } else {  // Parent process
         close(stdout_pipe[1]);
     }
-    buffer            = cb_temp_alloc(2 << 10);
+    buffer            = (char *)cb_temp_alloc(2 << 10);
     ssize_t bytesRead = 0;
     while ((bytesRead = read(stdout_pipe[0], buffer, 2 << 10)) > 0) cb_sb_append_buf(stdout_content, buffer, bytesRead);
-    close(stdout_pipe[0]);
-    waitpid(pid_proc, NULL, 0);
 #    endif  // CB_WINDOWS
 defer:
+    close(stdout_pipe[0]);
+    if (pid_proc > 0) waitpid(pid_proc, NULL, 0);
     if (buffer) cb_temp_reset_last();
     return result;
 }
@@ -939,14 +1065,16 @@ static cb_temp_alloc_t g_temp_alloc = {.size = 0, .last = 0, .data = {0}};
 
 char                  *cb_temp_strdup(const char *cstr) {
     size_t n      = strlen(cstr);
-    char  *result = cb_temp_alloc(n + 1);
+    char  *result = (char *)cb_temp_alloc(n + 1);
     memcpy(result, cstr, n);
     result[n] = '\0';
     return result;
 }
 
 void *cb_temp_alloc(size_t size) {
-    CB_ASSERT(((g_temp_alloc.size + size) < CB_TEMP_CAPACITY) && "[cb_temp_alloc] Extend the size of the predifined preprocessor `CB_TEMP_CAPACITY`");
+    CB_ASSERT(((g_temp_alloc.size + size) < CB_TEMP_CAPACITY) &&
+              "[cb_temp_alloc] Extend the size of the predifined preprocessor "
+              "`CB_TEMP_CAPACITY`");
     void *result      = &g_temp_alloc.data[g_temp_alloc.size];
     g_temp_alloc.last = size;
     g_temp_alloc.size += size;
@@ -959,7 +1087,7 @@ char *cb_temp_sprintf(const char *fmt, ...) {
     va_start(args1, fmt);
     int num = 1 + vsnprintf(NULL, 0, fmt, args1);
     va_end(args1);
-    char *result = cb_temp_alloc(num + 1);
+    char *result = (char *)cb_temp_alloc(num + 1);
     va_start(args2, fmt);
     vsnprintf(result, num, fmt, args2);
     va_end(args2);
@@ -985,7 +1113,7 @@ cb_strview_t cb_sv_chop_right_by_delim(cb_strview_t *sv, char delim) {
 
 bool        cb_sv_eq(cb_strview_t a, cb_strview_t b) { return (a.count != b.count) ? false : (memcmp(a.data, b.data, a.count) == 0); }
 const char *cb_sv_to_cstr(cb_strview_t sv) {
-    char *result = cb_temp_alloc(sv.count + 1);
+    char *result = (char *)cb_temp_alloc(sv.count + 1);
     memcpy(result, sv.data, sv.count);
     result[sv.count] = '\0';
     return result;
@@ -1016,7 +1144,7 @@ static inline cb_status_t __cb_set_contains_internal(cb_set_t *set, cb_strview_t
 }
 static inline cb_status_t __cb_set_insert_internal(cb_set_t *set, cb_set_item_t item) {
     if (__cb_set_contains_internal(set, item.item, item.hash, NULL) == CB_OK) return CB_ERR;
-    cb_da_append(set, item);
+    cb_da_append(set, cb_set_item_t *, item);
     return CB_OK;
 }
 cb_set_t    cb_set_create(void) { return (cb_set_t){.capacity = 0, .count = 0, .items = NULL}; }
@@ -1079,13 +1207,14 @@ static inline bool cb_config_parse_subcommand(const char *subcommand) {
     else if (CB_STRCMP_LIT(subcommand, "config") == 0) g_subcmd = CB_SUBCMD_CONFIG;
     else if (CB_STRCMP_LIT(subcommand, "tests") == 0) g_subcmd = CB_SUBCMD_TESTS;
     else if (CB_STRCMP_LIT(subcommand, "clean") == 0) g_subcmd = CB_SUBCMD_CLEAN;
+    else if (CB_STRCMP_LIT(subcommand, "install") == 0) g_subcmd = CB_SUBCMD_INSTALL;
     else CB_BAIL_ERROR(return false, "[Config] - Unknown Subcommand: %s", subcommand);
     return true;
 }
 
 int parse_enum_from_display(const char *str, const char **displays, size_t sizedisplay) {
     size_t str_len = strlen(str);
-    char  *tempstr = cb_temp_alloc(str_len + 1);
+    char  *tempstr = (char *)cb_temp_alloc(str_len + 1);
     strncpy(tempstr, str, str_len);
     for (size_t i = 0; i < str_len; i++) tempstr[i] = toupper(tempstr[i]);
 
@@ -1130,19 +1259,39 @@ static inline void cb_print_help(void) {
     fprintf(stderr, "USAGE: %s <SUBCOMMAND> [OPTIONS]" CB_LINE_END, program_name);
     fprintf(stderr, CB_LINE_END "SUBCOMMAND: " CB_LINE_END);
     fprintf(stderr, "    build          build the project" CB_LINE_END);
-    fprintf(stderr, "    config         configure with the options provided, will create config file in build dir" CB_LINE_END);
+    fprintf(stderr,
+            "    config         configure with the options provided, will "
+            "create config file in build dir" CB_LINE_END);
     fprintf(stderr, "    tests          tests the tests case for the project" CB_LINE_END);
     fprintf(stderr, "    clean          clean the build artifact" CB_LINE_END);
+    fprintf(stderr,
+            "    install        install project to "
+            "cfg.install_prefix:`%*s`" CB_LINE_END,
+            SVArg(g_cfg.install_prefix));
     fprintf(stderr, CB_LINE_END "OPTIONS: " CB_LINE_END);
-    fprintf(stderr, "   -ct, --compiler_type    set compiler type   [clang, gnu]                      (defualt same as `cb.h` compiles to)" CB_LINE_END);
-    fprintf(stderr, "   -cc, --compiler         set compiler        [path_to_compiler]                (default will search compiler type)" CB_LINE_END);
-    fprintf(stderr, "   -b,  --build            set build type      [debug, release, relwithdebinfo]  (default to 'debug')" CB_LINE_END);
-    fprintf(stderr, "   -p,  --program          set program type    [C, CPP]                          (default to 'C')" CB_LINE_END);
-    fprintf(stderr, "   -t,  --target           set target OS type  [windows, macos, unix]            (default to current run OS)" CB_LINE_END);
-    fprintf(stderr, "   -a,  --arch             set architecture    [X64, X86, ARM64, ARM32]          (default to current run arch)" CB_LINE_END);
+    fprintf(stderr,
+            "   -ct, --compiler_type    set compiler type   [clang, gnu]       "
+            "               (defualt same as `cb.h` compiles to)" CB_LINE_END);
+    fprintf(stderr,
+            "   -cc, --compiler         set compiler        [path_to_compiler] "
+            "               (default will search compiler type)" CB_LINE_END);
+    fprintf(stderr,
+            "   -b,  --build            set build type      [debug, release, "
+            "relwithdebinfo]  (default to 'debug')" CB_LINE_END);
+    fprintf(stderr,
+            "   -p,  --program          set program type    [C, CPP]           "
+            "               (default to 'C')" CB_LINE_END);
+    fprintf(stderr,
+            "   -t,  --target           set target OS type  [windows, macos, "
+            "unix]            (default to current run OS)" CB_LINE_END);
+    fprintf(stderr,
+            "   -a,  --arch             set architecture    [X64, X86, ARM64, "
+            "ARM32]          (default to current run arch)" CB_LINE_END);
     fprintf(stderr, "   -h,  --help             print this help text" CB_LINE_END);
     fprintf(stderr, "   -q,  --quite            set output to quite" CB_LINE_END);
-    fprintf(stderr, "   -d,  --display          display config  and target, will not start process" CB_LINE_END);
+    fprintf(stderr,
+            "   -d,  --display          display config  and target, will not "
+            "start process" CB_LINE_END);
     fprintf(stderr, "        --release          set build type to release" CB_LINE_END);
     fprintf(stderr, "        --debug            set build type to debug" CB_LINE_END);
 }
@@ -1165,8 +1314,8 @@ static inline bool cb_config_parse_from_args(int *c, char **v) {
 
     cb_config_t temp_cfg;
     if (cb_path_exists(&g_cfg.config_path)) {
-        // if config file is exists and the subcommand is not 'config' load the config
-        // else continue parse args
+        // if config file is exists and the subcommand is not 'config' load the
+        // config else continue parse args
         result &= cb_config_load(&g_cfg, g_cfg.config_path);
         memcpy(&temp_cfg, &g_cfg, sizeof(cb_config_t));
     }
@@ -1201,33 +1350,43 @@ static inline bool cb_config_parse_from_args(int *c, char **v) {
             g_cfg.compiler_path = cb_path(arg);
         } else if opts ("-ct", "--compiler_type") {
             opt_next_arg("-ct", "--compiler_type");
-            g_cfg.compiler_type = parse_enum_from_display(arg, CB_COMPILER_DISPLAY, ARRLEN(CB_COMPILER_DISPLAY));
+            g_cfg.compiler_type = (cb_compiler_t)parse_enum_from_display(arg, CB_COMPILER_DISPLAY, ARRLEN(CB_COMPILER_DISPLAY));
         } else if opts ("-cc", "--compiler") {
             opt_next_arg("-cc", "--compiler");
             g_cfg.compiler_path = cb_path(arg);
         } else if opts ("-", "--build") {
             opt_next_arg("-ct", "--compiler_type");
-            g_cfg.build_type = parse_enum_from_display(arg, CB_BUILD_TYPE_DISPLAY, ARRLEN(CB_BUILD_TYPE_DISPLAY));
+            g_cfg.build_type = (cb_build_t)parse_enum_from_display(arg, CB_BUILD_TYPE_DISPLAY, ARRLEN(CB_BUILD_TYPE_DISPLAY));
         } else if opts ("-p", "--program") {
             opt_next_arg("-p", "--program");
-            g_cfg.program_type = parse_enum_from_display(arg, CB_PROGRAM_DISPLAY, ARRLEN(CB_PROGRAM_DISPLAY));
+            g_cfg.program_type = (cb_program_t)parse_enum_from_display(arg, CB_PROGRAM_DISPLAY, ARRLEN(CB_PROGRAM_DISPLAY));
         } else if opts ("-t", "--target") {
             opt_next_arg("-t", "--target");
-            g_cfg.platform = parse_enum_from_display(arg, CB_PLATFORM_DISPLAY, ARRLEN(CB_PLATFORM_DISPLAY));
+            g_cfg.platform = (cb_platform_t)parse_enum_from_display(arg, CB_PLATFORM_DISPLAY, ARRLEN(CB_PLATFORM_DISPLAY));
         } else if opts ("-a", "--arch") {
             opt_next_arg("-a", "--arch");
-            g_cfg.arch     = parse_enum_from_display(arg, CB_ARCH_DISPLAY, ARRLEN(CB_ARCH_DISPLAY));
+            g_cfg.arch     = (cb_arch_t)parse_enum_from_display(arg, CB_ARCH_DISPLAY, ARRLEN(CB_ARCH_DISPLAY));
         }
         // clang-format on
         args = cb_shift_args(c, &v);
     }
     result &= cb_find_compiler(&g_cfg.compiler_path);
-    cb_path_copy(&g_cfg.build_artifact_path, g_cfg.build_path);
-    result &= cb_path_append_cstr(&g_cfg.build_artifact_path, ((is_release()) ? "release" : "debug"));
 
     if (memcmp(&temp_cfg, &g_cfg, sizeof(cb_config_t)) != 0 && g_subcmd != CB_SUBCMD_CONFIG) {
         result &= cb_config_save(&g_cfg, g_cfg.config_path);
     }
+
+    return result;
+}
+
+cb_status_t cb_config_set_install_prefix(cb_config_t *cfg, cb_path_t prefix) {
+    cb_status_t result = CB_OK;
+
+    cb_path_copy(&g_cfg.install_prefix, prefix);
+    cb_path_copy(&g_cfg.bin_install_dir, g_cfg.install_prefix);
+    result &= cb_path_append_cstr(&g_cfg.bin_install_dir, "bin");
+    cb_path_copy(&g_cfg.lib_install_dir, g_cfg.install_prefix);
+    result &= cb_path_append_cstr(&g_cfg.lib_install_dir, "lib");
 
     return result;
 }
@@ -1243,14 +1402,14 @@ cb_target_t cb_target_create(cb_strview_t name, cb_target_type_t type) {
     if (tgt.type == CB_TARGET_TYPE_SYSTEM_LIB) return tgt;
     tgt.output_dir = cb_path(g_cfg.build_artifact_path.data);
     cb_path_append(&tgt.output_dir, name);
-    tgt.output = cb_path(tgt.output_dir.data);
+    tgt.output      = cb_path(tgt.output_dir.data);
 
-    char *ext  = cb_config_get_ext(type);
+    const char *ext = cb_config_get_ext(type);
     if (CB_TARGET_TYPE_STATIC_LIB == type || type == CB_TARGET_TYPE_DYNAMIC_LIB) {
         char *fname = cb_temp_sprintf("lib" SVFmt, SVArg(name));
         cb_path_append_cstr(&tgt.output, fname);
         cb_temp_reset_last();
-        cb_path_with_extension(&tgt.output, ext);
+        cb_path_with_extension(&tgt.output, (char *)ext);
     } else {
         cb_path_append(&tgt.output, name);
     }
@@ -1271,9 +1430,9 @@ static inline cb_status_t __cb_target_add_sources_impl(cb_target_t *tg, cb_path_
     status &= cb_path_to_absolute_path(&source);
     cb_path_copy(&target_source.output, tg->output_dir);
     status &= cb_path_append(&target_source.output, cb_path_filename(&source));
-    status &= cb_path_with_extension(&target_source.output, "o");
+    status &= cb_path_with_extension(&target_source.output, (char *)"o");
     target_source.source = source;
-    cb_da_append(&tg->sources, target_source);
+    cb_da_append(&tg->sources, cb_source_t *, target_source);
     return status;
 }
 static inline cb_status_t __cb_target_add_includes_impl(cb_target_t *tg, const char *include) {
@@ -1285,7 +1444,16 @@ static inline cb_status_t __cb_target_add_defines_impl(cb_target_t *tg, const ch
 static inline cb_status_t __cb_target_link_library_impl(cb_target_t *tg, cb_target_t *lib) {
     cb_status_t status = CB_OK;
     switch (lib->type) {
-        case CB_TARGET_TYPE_SYSTEM_LIB: status &= cb_set_copy(&tg->ldflags, &lib->ldflags); break;
+        case CB_TARGET_TYPE_SYSTEM_LIB: {
+            for (size_t i = 0; i < lib->ldflags.count; i++) {
+                cb_set_item_t *it = &lib->ldflags.items[i];
+                if (memcmp(it->item.data, "-I", 2) == 0) {
+                    status &= cb_set_insert(&tg->includes, it->item);
+                } else {
+                    status &= cb_set_insert(&tg->ldflags, it->item);
+                }
+            }
+        } break;
         case CB_TARGET_TYPE_STATIC_LIB: status &= cb_target_add_flags(tg, "-static");
         case CB_TARGET_TYPE_DYNAMIC_LIB: {
             size_t checkpoint = cb_temp_save();
@@ -1298,7 +1466,11 @@ static inline cb_status_t __cb_target_link_library_impl(cb_target_t *tg, cb_targ
             cb_temp_rewind(checkpoint);
         } break;
 
-        default: CB_BAIL_ERROR(exit(1), "cb_target_link_library does not accept lib->type thats not equal to library type"); break;
+        default:
+            CB_BAIL_ERROR(exit(1),
+                          "cb_target_link_library does not accept lib->type "
+                          "thats not equal to library type");
+            break;
     }
 
     return status;
@@ -1311,7 +1483,7 @@ typedef struct {
 static inline bool __cb_target_add_sources_with_ext(cb_file_type_t ftype, cb_path_t *path, void *data) {
     CB_ASSERT(data);
     CB_ASSERT(path);
-    __cb_target_add_sources_with_ext_t *data_struct = data;
+    __cb_target_add_sources_with_ext_t *data_struct = (__cb_target_add_sources_with_ext_t *)data;
     if (ftype != CB_FILE_DIRECTORY) {
         if (cb_sv_eq(cb_path_extension(path), cb_sv(data_struct->ext))) {
             CB_INFO("Found file path: %*s", (int)path->count, path->data);
@@ -1346,15 +1518,15 @@ cb_status_t cb_target_as_cmd(cb_target_t *tg, cb_cmd_t *cmd) {
     cb_status_t status = CB_OK;
     if (tg->type == CB_TARGET_TYPE_SYSTEM_LIB) return status;
 
-    cb_da_append(cmd, cb_path_to_cstr(&g_cfg.compiler_path));
+    cb_da_append(cmd, const char **, cb_path_to_cstr(&g_cfg.compiler_path));
 
-    cb_da_foreach(&tg->flags, cb_set_item_t, cb_da_append(cmd, cb_sv_to_cstr(item->item)));
-    cb_da_foreach(&tg->includes, cb_set_item_t, cb_da_append(cmd, cb_sv_to_cstr(item->item)));
+    cb_da_foreach(&tg->flags, cb_set_item_t, cb_da_append(cmd, const char **, cb_sv_to_cstr(item->item)));
+    cb_da_foreach(&tg->includes, cb_set_item_t, cb_da_append(cmd, const char **, cb_sv_to_cstr(item->item)));
 
     cb_cmd_append(cmd, "-o", cb_path_to_cstr(&tg->output));
-    cb_da_foreach(&tg->sources, cb_source_t, cb_da_append(cmd, cb_path_to_cstr(&item->output)));
+    cb_da_foreach(&tg->sources, cb_source_t, cb_da_append(cmd, const char **, cb_path_to_cstr(&item->output)));
 
-    cb_da_foreach(&tg->ldflags, cb_set_item_t, cb_da_append(cmd, cb_sv_to_cstr(item->item)));
+    cb_da_foreach(&tg->ldflags, cb_set_item_t, cb_da_append(cmd, const char **, cb_sv_to_cstr(item->item)));
     return status;
 }
 bool cb_target_need_rebuild(cb_target_t *tg) {
@@ -1373,9 +1545,9 @@ bool cb_target_run(cb_target_t *tg) {
     cb_cmd_t    cmd         = {0};
     cb_procs_t  procs       = {0};
 
-    cb_da_append(&cmd, compiler);
-    for (size_t s = 0; s < tg->includes.count; s++) cb_da_append(&cmd, cb_sv_to_cstr(tg->includes.items[s].item));
-    for (size_t s = 0; s < tg->flags.count; s++) cb_da_append(&cmd, cb_sv_to_cstr(tg->flags.items[s].item));
+    cb_da_append(&cmd, const char **, compiler);
+    for (size_t s = 0; s < tg->includes.count; s++) cb_da_append(&cmd, const char **, cb_sv_to_cstr(tg->includes.items[s].item));
+    for (size_t s = 0; s < tg->flags.count; s++) cb_da_append(&cmd, const char **, cb_sv_to_cstr(tg->flags.items[s].item));
     size_t save_idx = cmd.count;
 
     for (size_t idx = 0; idx < tg->sources.count; idx++) {
@@ -1385,7 +1557,7 @@ bool cb_target_run(cb_target_t *tg) {
         if (p == CB_INVALID_PROC) {
             CB_ERROR("cb_cmd_run_async returned invalid proc");
         } else {
-            cb_da_append(&procs, p);
+            cb_da_append(&procs, cb_proc_t *, p);
         }
 
         cmd.count = save_idx;
@@ -1410,12 +1582,14 @@ defer:
 cb_t *cb_init(int argc, char **argv) {
     cb_config_parse_from_args(&argc, argv);
 
-    cb_t *cb          = (cb_t *)CB_REALLOC(NULL, sizeof(cb_t));
-    cb->count         = 0;
-    cb->items         = NULL;
-    cb->capacity      = 0;
-    cb->on_pre_build  = NULL;
-    cb->on_post_build = NULL;
+    cb_t *cb            = (cb_t *)CB_REALLOC(NULL, sizeof(cb_t));
+    cb->count           = 0;
+    cb->items           = NULL;
+    cb->capacity        = 0;
+    cb->on_pre_build    = NULL;
+    cb->on_post_build   = NULL;
+    cb->on_pre_install  = NULL;
+    cb->on_post_install = NULL;
     return cb;
 }
 
@@ -1457,6 +1631,11 @@ defer:
     return result;
 }
 static inline cb_status_t cb_targets_load(cb_t *cb) {
+    if (!cb_path_exists(&g_cfg.targets_path))
+        CB_BAIL_ERROR(return CB_ERR,
+                             "no targets available, use command 'config' as "
+                             "subcommand to initiate project configuration");
+
     cb_path_t   path   = {0};
     FILE       *fp     = NULL;
     cb_status_t result = CB_OK;
@@ -1488,7 +1667,7 @@ static inline cb_status_t cb_targets_load(cb_t *cb) {
         cb_bin_read_set(fp, &it->ldflags);
 
         cb_bin_read_prim(fp, it->sources.count);
-        it->sources.items = CB_REALLOC(NULL, it->sources.count * sizeof(cb_source_t));
+        it->sources.items = (cb_source_t *)CB_REALLOC(NULL, it->sources.count * sizeof(cb_source_t));
         CB_ASSERT_ALLOC(it->sources.items);
         fread(it->sources.items, sizeof(cb_source_t), it->sources.count, fp);
     }
@@ -1541,11 +1720,11 @@ static inline void cb_targets_display(cb_t *cb) {
     }
     printf(CB_LINE_END);
 }
-static inline cb_status_t __cb_build_target(cb_t *cb, cb_target_type_t type) {
+static inline cb_status_t __cb_do_build_target(cb_t *cb, cb_target_type_t type) {
     cb_status_t result = CB_OK;
     for (size_t i = 0; i < cb->count; i++) {
         cb_target_t *it = &cb->items[i];
-        cb_mkdir_if_not_exists(cb_path_to_cstr(&it->output_dir));
+        cb_mkdir_if_not_exists(cb_path_to_cstr(&it->output_dir), false);
         if (CB_TARGET_TYPE_DYNAMIC_LIB == it->type || it->type == CB_TARGET_TYPE_DYNAMIC_LIB) {
             if ((result &= cb_target_run(it)) == CB_ERR) CB_BAIL_ERROR(return result, "failed to run target: '%*s'", SVArg(it->name));
         }
@@ -1559,82 +1738,133 @@ static inline cb_status_t __cb_build_target(cb_t *cb, cb_target_type_t type) {
     return result;
 }
 
+static inline cb_status_t __cb_on_build_target(cb_t *cb, cb_target_type_t type) {
+    cb_status_t result = CB_OK;
+    if (cb->on_pre_build) result &= cb->on_pre_build(cb, &g_cfg);
+    result &= __cb_do_build_target(cb, type);
+    if (cb->on_post_build) result &= cb->on_post_build(cb, &g_cfg);
+    if (!result) CB_BAIL_ERROR(return result, "Failed building projects");
+    return result;
+}
+
+static inline cb_status_t __cb_on_config_target(cb_t *cb) {
+    cb_status_t result = CB_OK;
+
+    cb_path_copy(&g_cfg.build_artifact_path, g_cfg.build_path);
+    result &= cb_path_append_cstr(&g_cfg.build_artifact_path, ((is_release()) ? "release" : "debug"));
+
+    result &= on_configure(cb, &g_cfg);
+    if (result == CB_ERR) CB_BAIL_ERROR(return result, "Failed to configuring project, return got CB_ERR");
+    CB_INFO("(CB) - Saving Configuration to '%*s'", SVArg(g_cfg.config_path));
+    result &= cb_config_save(&g_cfg, g_cfg.config_path);
+    if (result == CB_ERR) CB_BAIL_ERROR(return result, "Failed to save config");
+    CB_INFO("(CB) - Saving Targets Information to '%*s'", SVArg(g_cfg.targets_path));
+    result &= cb_targets_save(cb);
+    if (result == CB_ERR) CB_BAIL_ERROR(return result, "Failed to save targets");
+    return result;
+}
+
 cb_status_t cb_run(cb_t *cb) {
     CB_ASSERT(cb != NULL);
     cb_status_t result = CB_OK;
 
-    result &= cb_mkdir_if_not_exists(cb_path_to_cstr(&g_cfg.build_path));
-    result &= cb_mkdir_if_not_exists(cb_path_to_cstr(&g_cfg.build_artifact_path));
+    result &= cb_mkdir_if_not_exists(cb_path_to_cstr(&g_cfg.build_path), false);
+    result &= cb_mkdir_if_not_exists(cb_path_to_cstr(&g_cfg.build_artifact_path), false);
 
     switch (g_subcmd) {
         case CB_SUBCMD_BUILD: {
-            if (cb_path_exists(&g_cfg.targets_path)) {
-                result &= cb_targets_load(cb);
-                if (result == CB_ERR) return CB_ERR;
-            } else {
-                CB_BAIL_ERROR(return CB_ERR, "no targets available, use command 'config' as subcommand to initiate project configuration");
-            }
+            if ((result &= cb_targets_load(cb)) == CB_ERR) return CB_ERR;
             CB_INFO("(CB) - Running Build");
             if (g_display_config) {
                 cb_config_display();
                 cb_targets_display(cb);
             } else {
-                if (cb->on_pre_build) result &= cb->on_pre_build(cb, &g_cfg);
-                result &= __cb_build_target(cb, CB_TARGET_TYPE_EXEC);
-                if (cb->on_post_build) result &= cb->on_post_build(cb, &g_cfg);
-                if (!result) CB_BAIL_ERROR(return result, "Failed building projects");
+                result &= __cb_on_build_target(cb, CB_TARGET_TYPE_EXEC);
             }
             CB_INFO("(CB) - Finish Build");
         } break;
 
         case CB_SUBCMD_CONFIG: {
             CB_INFO("(CB) - Running Configure");
-            result &= on_configure(cb, &g_cfg);
-            if (result == CB_ERR) CB_BAIL_ERROR(return result, "Failed to configuring project, return got CB_ERR");
-            CB_INFO("(CB) - Saving Configuration to '%*s'", SVArg(g_cfg.config_path));
-            result &= cb_config_save(&g_cfg, g_cfg.config_path);
-            if (result == CB_ERR) CB_BAIL_ERROR(return result, "Failed to save config");
-            CB_INFO("(CB) - Saving Targets Information to '%*s'", SVArg(g_cfg.targets_path));
-            result &= cb_targets_save(cb);
-            if (result == CB_ERR) CB_BAIL_ERROR(return result, "Failed to save targets");
-            CB_INFO("(CB) - Success Configuring Project, run `build` or `tests` to build and run tests");
+            result &= __cb_on_config_target(cb);
             if (g_display_config) {
                 cb_config_display();
                 cb_targets_display(cb);
             }
+            CB_INFO(
+                "(CB) - Success Configuring Project, run `build` or `tests` to "
+                "build and run tests");
         } break;
 
         case CB_SUBCMD_TESTS: {
-            if (cb_path_exists(&g_cfg.targets_path)) {
-                result &= cb_targets_load(cb);
-                if (result == CB_ERR) return CB_ERR;
-            } else {
-                CB_BAIL_ERROR(return CB_ERR, "no targets available, use command 'config' as subcommand to initiate project configuration");
-            }
+            if ((result &= cb_targets_load(cb)) == CB_ERR) return CB_ERR;
             CB_INFO("(CB) - Running Tests");
             if (g_display_config) {
                 cb_config_display();
                 cb_targets_display(cb);
             } else {
-                if (cb->on_pre_build) result &= cb->on_pre_build(cb, &g_cfg);
-                result &= __cb_build_target(cb, CB_TARGET_TYPE_TESTS);
-                if (!result) CB_BAIL_ERROR(return result, "Failed to run tests");
-                if (cb->on_post_build) result &= cb->on_post_build(cb, &g_cfg);
+                result &= __cb_on_build_target(cb, CB_TARGET_TYPE_TESTS);
             }
             CB_INFO("(CB) - Success on Running Tests");
         } break;
 
         case CB_SUBCMD_CLEAN: {
-            result &= cb_remove_dir_if_not_exists(cb_path_to_cstr(&g_cfg.build_artifact_path));
+            result &= cb_remove_dir_if_exists(cb_path_to_cstr(&g_cfg.build_artifact_path));
             if (result == CB_ERR) CB_BAIL_ERROR(return result, "Failed to remove directory");
         } break;
 
-        default: return CB_ERR;
+        case CB_SUBCMD_INSTALL: {
+            CB_INFO("(CB) - Running Install");
+            g_cfg.build_type = CB_BUILD_TYPE_RELEASE;
+            if ((result &= __cb_on_config_target(cb)) == CB_ERR) return CB_ERR;
+            if ((result &= __cb_on_build_target(cb, CB_TARGET_TYPE_EXEC)) == CB_ERR) return CB_ERR;
+            if (cb->on_pre_install)
+                if (cb->on_pre_install(cb, &g_cfg) == CB_ERR) CB_BAIL_ERROR(return CB_ERR, "Failed on running on_pre_install function");
+
+            if (g_cfg.install_prefix.count == 0)
+                CB_BAIL_ERROR(return CB_ERR, "cfg.install_prefix should set to install, set the prefix with `cb_config_set_install_prefix` function");
+
+            if (memcmp(g_cfg.install_prefix.data, "/usr", sizeof("/usr") - 1) == 0) {
+                if (getuid() != 0) CB_BAIL_ERROR(return CB_ERR, "Command install requires Admin Privilages!");
+            }
+            if (result == CB_OK) {
+                result &= cb_mkdir_if_not_exists(cb_path_to_cstr(&g_cfg.install_prefix), true);
+                result &= cb_mkdir_if_not_exists(cb_path_to_cstr(&g_cfg.bin_install_dir), false);
+                result &= cb_mkdir_if_not_exists(cb_path_to_cstr(&g_cfg.lib_install_dir), false);
+            }
+
+            if (g_display_config) {
+                cb_config_display();
+                cb_targets_display(cb);
+                return result;
+            }
+            size_t bin_path_len = g_cfg.bin_install_dir.count;
+            size_t lib_path_len = g_cfg.lib_install_dir.count;
+
+            for (size_t i = 0; i < cb->count; i++) {
+                cb_target_t *tg = &cb->items[i];
+                if (tg->type == CB_TARGET_TYPE_EXEC) {
+                    if ((result &= cb_path_append(&g_cfg.bin_install_dir, tg->name)) == CB_ERR) return CB_ERR;
+                    if (!cb_copy_file(cb_path_to_cstr(&g_cfg.bin_install_dir), cb_path_to_cstr(&tg->output))) return CB_ERR;
+                    g_cfg.bin_install_dir.count = bin_path_len;
+                } else if (CB_TARGET_TYPE_DYNAMIC_LIB == tg->type || tg->type == CB_TARGET_TYPE_STATIC_LIB) {
+                    if ((result &= cb_path_append(&g_cfg.lib_install_dir, tg->name)) == CB_ERR) return CB_ERR;
+                    if (!cb_copy_file(cb_path_to_cstr(&g_cfg.lib_install_dir), cb_path_to_cstr(&tg->output))) return CB_ERR;
+                    g_cfg.lib_install_dir.count = lib_path_len;
+                }
+            }
+            if (cb->on_post_install)
+                if (cb->on_post_install(cb, &g_cfg) == CB_ERR) CB_BAIL_ERROR(return CB_ERR, "Failed on running on_post_install function");
+            CB_INFO("(CB) - Success Running Install");
+        } break;
+
+        case CB_SUBCMD_NOOP:
+        case CB_SUBCMD_MAX: break;
     }
 
     return result;
 }
-cb_status_t  cb_dump_compile_commands(cb_t *cb) {
+cb_status_t cb_dump_compile_commands(cb_t *cb) {
     (void)cb;
     return CB_ERR;
 }
@@ -1652,12 +1882,14 @@ void cb_deinit(cb_t *cb) {
 
 cb_target_t *cb_create_target_impl(cb_t *cb, cb_strview_t name, cb_target_type_t type) {
     CB_ASSERT(cb != NULL);
-    cb_da_append(cb, cb_target_create(name, type));
+    cb_da_append(cb, cb_target_t *, cb_target_create(name, type));
     return cb_da_last(cb);
 }
 
 void         cb_add_on_pre_build_callback(cb_t *cb, cb_callback_fn callback) { cb->on_pre_build = callback; }
 void         cb_add_on_post_build_callback(cb_t *cb, cb_callback_fn callback) { cb->on_post_build = callback; }
+void         cb_add_on_pre_install_callback(cb_t *cb, cb_callback_fn callback) { cb->on_pre_install = callback; }
+void         cb_add_on_post_install_callback(cb_t *cb, cb_callback_fn callback) { cb->on_post_install = callback; }
 cb_target_t *cb_create_target_pkgconf(cb_t *cb, cb_strview_t name) {
 #    ifdef CB_WINDOWS
     CB_ERROR("cb_create_target_pkgconf is not supported in windows");
@@ -1677,13 +1909,12 @@ cb_target_t *cb_create_target_pkgconf(cb_t *cb, cb_strview_t name) {
     while (token != NULL) {
         if (!(token[0] == '\n' || token[0] == '\t' || token[0] == ' ')) {
             cb_set_insert_cstr(&tgt.ldflags, cb_temp_strdup(token));
-            CB_INFO("token: %s", token);
         }
         token = strtok(NULL, " ");
     }
 
     cb_sb_free(contents_buff);
-    cb_da_append(cb, tgt);
+    cb_da_append(cb, cb_target_t *, tgt);
     return cb_da_last(cb);
 #    endif  // CB_WINDOWS
 }
@@ -1715,7 +1946,8 @@ struct dirent *readdir(DIR *dirp) {
     } else {
         if (!FindNextFile(dirp->hFind, &dirp->data)) {
             if (GetLastError() != ERROR_NO_MORE_FILES) {
-                // TODO: readdir should set errno accordingly on FindNextFile fail
+                // TODO: readdir should set errno accordingly on
+                // FindNextFile fail
                 // https://docs.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror
                 errno = ENOSYS;
             }
