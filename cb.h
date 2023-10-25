@@ -4,7 +4,7 @@
 #    define CB_H_
 
 // #    ifdef CB_TESTS
-#    define CB_IMPLEMENTATION
+// #    define CB_IMPLEMENTATION
 // #    endif
 
 #    define CB_ASSERT(...)        assert(__VA_ARGS__)
