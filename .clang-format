@@ -26,9 +26,9 @@ AllowShortEnumsOnASingleLine: true
 ColumnLimit: '160'
 IndentPPDirectives: AfterHash
 
-AlwaysBreakTemplateDeclarations: Yes
-AlignConsecutiveMacros: AcrossEmptyLines
-AlignConsecutiveAssignments: AcrossEmptyLines
-AllowShortLambdasOnASingleLine: All
-AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+# AlwaysBreakTemplateDeclarations: Yes
+# AlignConsecutiveMacros: AcrossEmptyLines
+# AlignConsecutiveAssignments: AcrossEmptyLines
+# AllowShortLambdasOnASingleLine: All
+# AllowShortIfStatementsOnASingleLine: AllIfsAndElse
 ---
