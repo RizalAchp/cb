@@ -1,5 +1,8 @@
 #pragma once
 
+#include <iomanip>
+#include <stack>
+#include <type_traits>
 #define CB_IMPLEMENTATION
 
 #ifndef __CB_H__
@@ -7,7 +10,7 @@
 
 #    define CB_ASSERT(PRED, ...) \
         if (!(PRED)) CB_BAIL_ERROR(exit(1), "ASSERTION ERROR: (" #PRED "):" __VA_ARGS__)
-#    define CB_ASSERT_ALLOC(PTR) CB_ASSERT((PTR != NULL), "Buy more RAM lol")
+#    define CB_ASSERT_ALLOC(PTR) CB_ASSERT((PTR != nullptr), "Buy more RAM lol")
 
 #    include <algorithm>
 #    include <array>
@@ -113,34 +116,35 @@ typedef int proc_t;
 #    define SVArg(sv) (int)sv.size(), sv.data()
 
 namespace cb {
-    namespace fs    = std::filesystem;
-    using strview_t = std::string_view;
-    using str_t     = std::string;
-    using cmd_t     = std::vector<const char *>;
-    using procs_t   = std::vector<proc_t>;
+    namespace fs  = std::filesystem;
+    using StrView = std::string_view;
+    using Str     = std::string;
+    using Cmd     = std::vector<const char *>;
+    using Procs   = std::vector<proc_t>;
     template <typename T, size_t N>
-    using arr_t = std::array<T, N>;
+    using Arr = std::array<T, N>;
     template <typename T>
-    using vec_t = std::vector<T>;
+    using Vec = std::vector<T>;
     template <typename T>
-    using option = std::optional<T>;
+    using Option = std::optional<T>;
 
     template <typename Key, typename Value>
-    using map_t = std::unordered_map<Key, Value>;
+    using Map = std::unordered_map<Key, Value>;
 
-    struct Cb;
     struct Config;
-    enum class Status : int { ERR = 0, OK = 1 };
-    enum class LogLevel : uint8_t { NONE, INFO, WARNING, ERROR, FATAL, MAX };
+    struct Cb;
 
-    enum class Build : uint8_t { DEBUG, RELEASE, RELEASEDEBUG, MAX };
-    enum class Platform : uint8_t { UNKNOWN, WINDOWS, MACOS, UNIX, MAX };
-    enum class Arch : uint8_t { UNKNOWN, X64, X86, ARM64, ARM32, MAX };
-    enum class Compiler : uint8_t { UNKNOWN, CLANG, GNU, MSVC, MAX };
-    enum class Program : uint8_t { UNKNOWN, C, CPP, MAX };
-    enum class TargetType : uint8_t { EXEC = 0, STATIC_LIB, DYNAMIC_LIB, TESTS, SYSTEM_LIB, MAX };
+    enum class Status : uint8_t { ERR = 0, OK = 1 };
+    enum class LogLevel : size_t { NONE = 0, INFO, WARNING, ERROR, FATAL, MAX };
 
-    typedef Status               (*callbacks_cb_t)(Cb &cb);
+    enum class Build : size_t { DEBUG = 0, RELEASE, RELEASEDEBUG, MAX };
+    enum class Platform : size_t { UNKNOWN = 0, WINDOWS, MACOS, UNIX, MAX };
+    enum class Arch : size_t { UNKNOWN = 0, X64, X86, ARM64, ARM32, MAX };
+    enum class Compiler : size_t { UNKNOWN = 0, CLANG, GNU, MSVC, MAX };
+    enum class Program : size_t { UNKNOWN = 0, C, CPP, MAX };
+    enum class TargetType : size_t { EXEC = 0, STATIC_LIB, DYNAMIC_LIB, SYSTEM_LIB, MAX };
+
+    using callbacks_cb_t = std::function<Status(Cb *)>;
     constexpr inline const char *program_ext(Program p) { return (p == Program::C) ? "c" : "cpp"; }
 
 #    define CB_FATAL(...) log(LogLevel::FATAL, __FILE__, __LINE__, format_str(__VA_ARGS__))
@@ -165,18 +169,46 @@ namespace cb {
 #    define NOT_IMPLEMENTED(DESC) CB_BAIL_ERROR(exit(1), "Not Implemented: %s", DESC)
 #    define UNREACHABLE(DESC)     CB_BAIL_ERROR(exit(1), "Unreachable: %s", DESC)
 
-    CB_FNDEF bool  rebuild_self(int argc, char *argv[], const char *source_path);
+    CB_FNDEF Str  format_str(const char *fmt, ...) __attribute__((__format__(__printf__, 1, 2)));
+    CB_FNDEF void log(LogLevel level, const char *file, int line, Str msg);
+    CB_FNDEF bool on_errc_impl(std::error_code &ec, Str msg);
+#    define on_errc(ec, ...) on_errc_impl(ec, format_str(__VA_ARGS__))
 
-    CB_FNDEF str_t format_str(const char *fmt, ...) __attribute__((__format__(__printf__, 1, 2)));
-    CB_FNDEF void  log(LogLevel level, const char *file, int line, str_t msg);
-    CB_FNDEF bool  on_errc(std::error_code &ec, const char *fmt, ...) __attribute__((__format__(__printf__, 2, 3)));
-
-    CB_FNDEF void  ltrim(std::string &s);
-    CB_FNDEF void  rtrim(std::string &s);
-    CB_FNDEF void  trim(std::string &s);
+    CB_FNDEF Str &ltrim(Str &s);
+    CB_FNDEF Str &rtrim(Str &s);
+    CB_FNDEF Str &trim(Str &s);
     // trim from both ends (copying)
-    CB_FNDEF std::string trim_copy(std::string s);
-    extern LogLevel      g_log_level;
+    CB_FNDEF Str trim_copy(Str s);
+    CB_FNDEF Vec<StrView> split(StrView s, StrView delimiter);
+
+    CB_FNDEF bool         file_rename(const Str old_path, const Str new_path);
+    CB_FNDEF bool         file_exists(const fs::path &file_path);
+
+    CB_FNDEF bool         rebuild_self(int argc, char *argv[], const char *source_path);
+    CB_FNDEF bool         mkdir_if_not_exists(const fs::path &path);
+    CB_FNDEF bool         remove_dir_if_exists(const fs::path &dirpath);
+    CB_FNDEF bool         copy_file(const Str &dst_path, const Str &src_path);
+    /// run command in shell and get output from stdout into `stdout_content`
+    CB_FNDEF bool current_path(fs::path &out_path, const char *optional_append_path = nullptr);
+    CB_FNDEF fs::path path_to_absolute(const fs::path &path);
+    CB_FNDEF bool     home_dir(fs::path &out_path, const char *optional_append_path = nullptr);
+    CB_FNDEF bool     set_permissions(const fs::path &file, fs::perms permissions);
+
+    using WalkdirCallback = std::function<bool(const fs::path &)>;
+    CB_FNDEF bool walkdir(const fs::path &parent, bool recursive, WalkdirCallback callback);
+
+    // Wait until the process has finished
+    CB_FNDEF bool procs_wait(const Procs &procs);
+    CB_FNDEF bool proc_wait(proc_t proc);
+
+    /// run cmd_t asynchronously, returned handle of proc_t
+    /// wait the process using function `proc_wait`
+    CB_FNDEF proc_t cmd_run_async(Cmd &cmd);
+    /// run cmd_t and wait until finish (sync)
+    CB_FNDEF bool   cmd_run(Cmd &cmd);
+    CB_FNDEF Status popen_stdout(const Str &cmd, Str &stdout_content);
+
+    extern LogLevel g_log_level;
 
 #    define CONCAT_INTERNAL(x, y) x##y
 #    define CONCAT(x, y)          CONCAT_INTERNAL(x, y)
@@ -203,20 +235,19 @@ namespace cb {
 #    define defer const auto &CONCAT(defer__, __LINE__) = ExitScopeHelp() + [&]()
 
     struct SerializeDeserialize {
-        SerializeDeserialize() noexcept                              = default;
-        virtual ~SerializeDeserialize()                              = default;
-        virtual bool serialize(std::ostream &outstream)              = 0;
-        virtual bool deserialize_key_value(str_t &key, str_t &value) = 0;
+        SerializeDeserialize() noexcept                          = default;
+        virtual ~SerializeDeserialize()                          = default;
+        virtual bool serialize(std::ostream &outstream)          = 0;
+        virtual bool deserialize_key_value(Str &key, Str &value) = 0;
         virtual bool deserialize(std::istream &instream) {
-            str_t linebuf;
-            while (std::getline(instream, linebuf)) {
-                trim(linebuf);
-                if (linebuf.empty()) continue;
+            Str linebuf;
+            while (getline(instream, linebuf)) {
+                if (trim(linebuf).empty()) continue;
                 if (linebuf.front() == '#') continue;
-                if (auto eq_delim = linebuf.find_first_of('='); eq_delim != str_t::npos) {
+                if (auto eq_delim = linebuf.find_first_of('='); eq_delim != Str::npos) {
                     auto key   = linebuf.substr(0, eq_delim);
                     auto value = linebuf.substr(eq_delim + 1);
-                    if (!deserialize_key_value(key, value)) {
+                    if (!deserialize_key_value(trim(key), trim(value))) {
                         CB_ERROR("Failed to deserialize key: `%s`, value: `%s`", key.c_str(), value.c_str());
                         return false;
                     }
@@ -236,7 +267,8 @@ namespace cb {
     //  1 - does needs rebuild
     // -1 - error. The error is logged
     template <size_t N>
-    nr_status needs_rebuild(const char *output_path, arr_t<const char *, N> input_paths) {
+    CB_FNDEF nr_status needs_rebuild(const char *output_path, Arr<const char *, N> input_paths) {
+        if (!file_exists(output_path)) return nr_status::YES;
         std::error_code ec;
         auto            output_path_time = fs::last_write_time(output_path, ec);
         if (!on_errc(ec, "Failed to get last_write_time for file '%s'", output_path)) return nr_status::ERR;
@@ -249,45 +281,29 @@ namespace cb {
         }
         return nr_status::NO;
     }
-    CB_FNDEF bool file_exists(const fs::path &file_path);
-    CB_FNDEF bool chmod(const fs::path &file, unsigned int octal_mode);
-    CB_FNDEF bool home_dir(fs::path &out_path, const char *optional_append_path = NULL);
-
-    Status        find_compiler(fs::path &compiler_path, const Config &cfg);
-    // Wait until the process has finished
-    CB_FNDEF bool   procs_wait(const procs_t &procs);
-    CB_FNDEF bool   proc_wait(proc_t proc);
-
-    CB_FNDEF proc_t cmd_run_async(cmd_t &cmd);
-    CB_FNDEF bool   cmd_run_sync(cmd_t &cmd);
-    CB_FNDEF Status popen_stdout(const char *cmd, str_t &stdout_content);
-    CB_FNDEF bool   current_path(fs::path &out_path, const char *optional_append_path = NULL);
-
-    using WalkdirCallback = std::function<bool(const fs::path &)>;
-    CB_FNDEF bool walkdir(const fs::path &parent, bool recursive, WalkdirCallback callback);
     /// config_t /////////////////////////////////////////////
     struct Config : public SerializeDeserialize {
-        Build     build_type;
-        Platform  platform_kind;
-        Arch      arch_kind;
-        Compiler  compiler_type;
-        Program   program_type;
+        Build         build_type;
+        Platform      platform_kind;
+        Arch          arch_kind;
+        Compiler      compiler_type;
+        Program       program_type;
+        bool          dump_compile_command;
 
-        strview_t subcmd;
-        str_t     project_name;
-        fs::path  project_path;
-        fs::path  build_path;
-        fs::path  build_artifact_path;
-        fs::path  compiler_path;
-        fs::path  config_path;
-        fs::path  targets_path;
+        StrView       subcmd;
+        Str           project_name;
+        fs::path      project_path;
+        fs::path      build_path;
+        fs::path      build_artifact_path;
+        fs::path      compiler_path;
+        fs::path      config_path;
+        fs::path      targets_path;
 
-        fs::path  install_prefix;
-        fs::path  bin_install_dir;
-        fs::path  lib_install_dir;
+        fs::path      install_prefix;
+        fs::path      bin_install_dir;
+        fs::path      lib_install_dir;
 
-        Config(const str_t &name);
-        virtual ~Config() override {}
+        static Config create(const Str &name);
 
         constexpr bool inline is_debug() const { return (build_type == Build::DEBUG || build_type == Build::RELEASEDEBUG); }
         constexpr bool inline is_release() const { return (build_type == Build::RELEASE || build_type == Build::RELEASEDEBUG); }
@@ -299,10 +315,10 @@ namespace cb {
         void         set_build_path(const fs::path &path);
         void         set_compiler(const fs::path &cpath, Compiler ctype = Compiler::UNKNOWN);
 
-        bool         parse_from_args(const vec_t<strview_t> args, const map_t<strview_t, callbacks_cb_t> &callbacks);
+        bool         parse_from_args(const Vec<StrView> args, const Map<StrView, callbacks_cb_t> &callbacks);
 
         virtual bool serialize(std::ostream &outstream) override;
-        virtual bool deserialize_key_value(str_t &key, str_t &value) override;
+        virtual bool deserialize_key_value(Str &key, Str &value) override;
         Status       save(const fs::path &path);
         Status       load(const fs::path &path);
 
@@ -319,85 +335,113 @@ namespace cb {
         size_t hash() const;
         bool   is_changed() const;
 
+        virtual ~Config() override = default;
+        Config(Config &&)          = default;
+
        private:
+        Config(const Config &)            = delete;
+        Config &operator=(const Config &) = delete;
+        Config &operator=(Config &&)      = delete;
+        Config()
+            : SerializeDeserialize()
+            , build_type(Build::DEBUG)
+            , platform_kind(CB_DEFAULT_PLATFORM)
+            , arch_kind(Arch::X64)
+            , compiler_type(CB_DEFAULT_COMPILER)
+            , program_type(Program::C)
+            , subcmd("") {}
         size_t __hash;
     };
 
     /// target_t /////////////////////////////////////////////
     struct Source {
-        fs::path source;
-        fs::path output;
+        fs::path src;
+        fs::path out;
 
         Source() = default;
         Source(const fs::path &dir, const fs::path &str);
 
-        inline bool need_rebuild() const { return needs_rebuild<1>(output.c_str(), {source.c_str()}) == nr_status::YES; }
+        inline bool need_rebuild() const { return needs_rebuild<1>(out.c_str(), {src.c_str()}) == nr_status::YES; }
     };
 
     struct Target : public SerializeDeserialize {
-        TargetType    type;
-        str_t         name;
-        fs::path      output_dir;
-        fs::path      output;
+        TargetType  type;
+        Str         name;
+        Source      file;
+        fs::path    output_dir;
 
-        vec_t<str_t>  flags;
-        vec_t<str_t>  includes;
-        vec_t<str_t>  ldflags;
-        vec_t<Source> sources;
+        Vec<Str>    flags;
+        Vec<Str>    ldflags;
+        Vec<Source> sources;
 
         virtual ~Target() override{};
 
         Target() = default;
-        Target(str_t name, TargetType type, const Config &cfg);
-        Status       add_sources_with_ext(const fs::path &dir, const char *ext, bool recursive);
-        virtual bool serialize(std::ostream &out) override;
-        virtual bool deserialize_key_value(str_t &key, str_t &value) override;
+        Target(Str name, TargetType type, const Config &cfg);
+        Status        add_sources_with_ext(const fs::path &dir, const char *ext, bool recursive);
+        virtual bool  serialize(std::ostream &out) override;
+        virtual bool  deserialize_key_value(Str &key, Str &value) override;
 
-        Status       add_source(fs::path src) {
+        inline Status add_main_source(fs::path src) {
+            std::error_code ec;
+            file.src = fs::absolute(src, ec);
+            return on_errc(ec, "Failed to get absolute path from %s", src.c_str()) ? Status::OK : Status::ERR;
+        }
+
+        inline Status add_source(fs::path src) {
             sources.emplace_back(output_dir, src);
             return Status::OK;
         }
         template <typename... Types>
-        Status add_sources(Types... types) {
+        inline Status add_sources(Types... types) {
             Status res = Status::OK;
-            for (const auto &t : {types...})
-                if (!add_source(t)) return Status::ERR;
+            for (const auto &t : {types...}) res &= add_source(t);
             return res;
         }
         template <typename... Types>
-        Status add_flags(Types... types) {
+        inline Status add_flags(Types... types) {
             flags.insert(flags.end(), {types...});
             return Status::OK;
         }
         template <typename... Types>
-        Status add_includes(Types... types) {
-            for (auto tp : {types...}) flags.push_back(format_str("-I%s", tp.c_str()));
+        inline Status add_includes(const fs::path &p, const Types &...paths) {
+            flags.push_back(format_str("-I%s", p.c_str()));
+            Arr<Str, sizeof...(paths)> arrs{paths...};
+            for (auto tp : arrs) flags.push_back(format_str("-I%s", tp.c_str()));
             return Status::OK;
         }
 
         template <typename... Types>
-        Status add_defines(Types... types) {
-            for (auto tp : {types...}) flags.push_back(format_str("-D%s", tp.c_str()));
+        inline Status add_defines(const Str &def, Types... types) {
+            flags.push_back(format_str("-D%s", def.c_str()));
+            Arr<Str, sizeof...(types)> arrs{types...};
+            for (auto tp : arrs) flags.push_back(format_str("-D%s", tp.c_str()));
             return Status::OK;
         }
 
-        Status link_library(const std::shared_ptr<Target> &tgt);
         template <typename... Types>
-        Status link_libraries(const Types &...types) {
+        inline Status add_ldflags(Types... types) {
+            ldflags.insert(ldflags.end(), {types...});
+            return Status::OK;
+        }
+
+        Status link_library(const std::shared_ptr<Target> tgt);
+        template <typename... Types>
+        inline Status link_libraries(const Types... types) {
             Status res = Status::OK;
             for (const auto &t : {types...})
-                if (!link_library(t)) return Status::ERR;
+                if (link_library(t) == Status::ERR) return Status::ERR;
             return res;
         }
 
-        cmd_t       into_cmd(const Config &cfg);
+        Cmd         into_cmd(const Config &cfg);
         Status      run(const Config &cfg);
 
+        Status      install(fs::path install_dir);
+
         inline bool need_rebuild() const {
-            if (!file_exists(output)) {
-                return false;
-            }
-            return std::any_of(sources.begin(), sources.end(), [](const Source &s) { return s.need_rebuild(); });
+            if (!file_exists(file.out)) return true;
+            return any_of(sources.begin(), sources.end(), [](const Source &s) { return s.need_rebuild(); });
         }
 
         size_t hash();
@@ -412,30 +456,34 @@ namespace cb {
 
     /// cb_t /////////////////////////////////////////////
     struct Cb {
-        Config                           cfg;
-        vec_t<std::shared_ptr<Target>>   targets;
-        map_t<strview_t, callbacks_cb_t> callbacks;
+        Config                       cfg;
+        Vec<std::shared_ptr<Target>> targets;
+        Map<StrView, callbacks_cb_t> callbacks;
 
         Cb(const char *name);
 
         Status                  run(int argc, char **argv);
-        Status                  dump_compile_commands();
 
-        std::shared_ptr<Target> create_target(str_t name, TargetType type);
-        std::shared_ptr<Target> create_target_pkgconf(str_t name);
+        std::shared_ptr<Target> create_target(Str name, TargetType type, const fs::path &source = "");
+        std::shared_ptr<Target> create_target_pkgconf(Str name);
 
         /// helper of function [cb_t::create_target] for each TargetType
-        inline std::shared_ptr<Target> create_exec(str_t name) { return create_target(name, TargetType::EXEC); }
-        inline std::shared_ptr<Target> create_tests(str_t name) { return create_target(name, TargetType::TESTS); }
-        inline std::shared_ptr<Target> create_static_lib(str_t name) { return create_target(name, TargetType::STATIC_LIB); }
-        inline std::shared_ptr<Target> create_dynamic_lib(str_t name) { return create_target(name, TargetType::DYNAMIC_LIB); }
+        inline std::shared_ptr<Target> create_exec(Str name, const fs::path &source = "") { return create_target(name, TargetType::EXEC, source); }
+        inline std::shared_ptr<Target> create_static_lib(Str name) { return create_target(name, TargetType::STATIC_LIB); }
+        inline std::shared_ptr<Target> create_dynamic_lib(Str name) { return create_target(name, TargetType::DYNAMIC_LIB); }
+
+        inline void                    set_log_level(LogLevel lvl) const { g_log_level = lvl; }
+        inline void                    dump_compile_commands(bool dump) { this->cfg.dump_compile_command = dump; }
 
         /// add callbacks for operation
         /// operation = [ "build", "config", "install", "clean" ]
         ///
         /// (is optional, if the callback for operation above is not set, it will defaulted to the
         /// static function in cb_t class to call)
-        void   add_callback(const strview_t on, callbacks_cb_t cb) { callbacks.insert_or_assign(on, cb); }
+        void add_callback(const StrView on, callbacks_cb_t cb) {
+            CB_INFO("adding callback for event '%*s'", (int)on.size(), on.data());
+            callbacks.insert_or_assign(on, cb);
+        }
 
         Status save_targets();
         Status load_targets();
@@ -449,10 +497,10 @@ namespace cb {
         size_t source_hash() const;
 
        private:
-        static Status m_on_build_target(Cb &cb);
-        static Status m_on_config_target(Cb &cb);
-        static Status m_on_install_target(Cb &cb);
-        static Status m_on_clean_target(Cb &cb);
+        static Status m_on_build_target(Cb *cb);
+        static Status m_on_config_target(Cb *cb);
+        static Status m_on_install_target(Cb *cb);
+        static Status m_on_clean_target(Cb *cb);
 
         size_t        __source_hashes;
     };
@@ -473,31 +521,37 @@ namespace cb {
 
 #    define ARRLEN(ARR) (sizeof((ARR)) / sizeof((ARR)[0]))
 
-    static strview_t   program_name     = __FILE__;
+    static StrView     program_name     = __FILE__;
     static bool        g_display_config = false;
     LogLevel           g_log_level      = LogLevel::INFO;
 
-    static inline bool case_cmp(char a, char b) { return std::toupper(a) == std::toupper(b); }
-    static inline bool case_cmp(const strview_t a, const strview_t b) {
+    static inline bool case_cmp(char a, char b) { return toupper(a) == toupper(b); }
+    static inline bool case_cmp(const StrView a, const StrView b) {
         return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), b.end(), [](char a, char b) { return case_cmp(a, b); });
     }
 
     template <typename T>
     struct EnumDisplay {
-        arr_t<const char *, static_cast<size_t>(T::MAX)> displays;
+        Arr<StrView, static_cast<size_t>(T::MAX)> displays;
 
         template <typename... Targs>
-        constexpr EnumDisplay(Targs... targs) : displays({targs...}) {}
+        constexpr EnumDisplay(Targs... targs) : displays({targs...}) {
+            static_assert(sizeof...(targs) == static_cast<size_t>(T::MAX), "size of enum is not equal to size of displays");
+        }
 
-        T parse(const strview_t &needle) const {
+        T parse(const StrView &needle) const {
             for (size_t idx = 0; idx < displays.size(); idx++) {
                 if (case_cmp(needle, displays[idx]) && (idx < static_cast<size_t>(T::MAX))) {
-                    return T(idx);
+                    return static_cast<T>(idx);
                 }
             }
+            CB_WARNING("Display parse is failed, defaulted to 0");
             return T(0);
         }
-        constexpr const char *operator[](T idx) const { return displays.at(static_cast<size_t>(idx)); }
+        Str operator[](T idx) const {
+            auto d = displays[static_cast<size_t>(idx)];
+            return Str{d.data(), d.size()};
+        }
     };
 
     constexpr EnumDisplay<Build>      BUILD_TYPE_DISPLAY{"DEBUG", "RELEASE", "REDEBUG"};
@@ -508,49 +562,17 @@ namespace cb {
     constexpr EnumDisplay<TargetType> TARGET_TYPE_DISPLAY{"executable", "staticlib", "dynamiclib", "systemlib"};
     constexpr EnumDisplay<LogLevel>   LOG_LEVEL_DISPLAY{"N/A", "INFO", "WARN", "ERROR", "FATAL"};
 
+    static Status                     which_exec(const Str &exec, fs::path &out);
+    static Status                     find_compiler(fs::path &compiler_path, const Config &cfg);
+    static void                       compile_commands(Cb *cb);
+
     //////////////////////////////////////////////////////////
     static inline char *shift_args(int *argc, char ***argv) {
-        if (*argc == 0) return NULL;
+        if (*argc == 0) return nullptr;
         char *result = **argv;
         (*argv) += 1;
         (*argc) -= 1;
         return result;
-    }
-
-    str_t format_str(const char *fmt, ...) {
-        va_list args;
-        va_start(args, fmt);
-
-        va_list args_copy;
-        va_copy(args_copy, args);
-        const int len = vsnprintf(NULL, 0, fmt, args_copy);
-        va_end(args_copy);
-
-        // return a formatted string without risking memory mismanagement
-        // and without assuming any Compiler or Platform specific behavior
-        std::vector<char> zc(len + 1);
-        vsnprintf(zc.data(), zc.size(), fmt, args);
-        va_end(args);
-        return std::string(zc.data(), len);
-    }
-
-    void log(LogLevel level, const char *file, int line, str_t msg) {
-        std::cerr << LOG_LEVEL_DISPLAY[level] << ": ";
-        std::cerr << file << ":" << line << ": " << msg << std::endl;
-    }
-
-    bool on_errc(std::error_code &ec, const char *fmt, ...) {
-        if (ec.value() != 0) {
-            fprintf(stderr, "[ERROR]:");
-            va_list args;
-            va_start(args, fmt);
-            vfprintf(stderr, fmt, args);
-            va_end(args);
-            fprintf(stderr, " - (Reason(%d): %s)\n", ec.value(), ec.message().c_str());
-            ec.clear();
-            return false;
-        }
-        return true;
     }
 
     template <typename T, typename Hasher = std::hash<T>>
@@ -563,16 +585,70 @@ namespace cb {
         for (auto v : {vargs...}) hash_combine<decltype(v)>(seed, v);
     }
 
-    void ltrim(std::string &s) { s.erase(s.begin(), std::find_if(s.begin(), s.end(), std::not_fn(isspace))); }
-    void rtrim(std::string &s) { s.erase(std::find_if(s.rbegin(), s.rend(), std::not_fn(isspace)).base(), s.end()); }
-    void trim(std::string &s) { rtrim(s), ltrim(s); }
-    // trim from both ends (copying)
-    std::string trim_copy(std::string s) {
-        trim(s);
-        return s;
+    Status &operator&=(Status &lhs, const Status rhs) {
+        lhs = (Status)(static_cast<uint8_t>(lhs) & static_cast<uint8_t>(rhs));
+        return lhs;
     }
 
-    static bool rename(const str_t old_path, const str_t new_path) {
+    Str format_str(const char *fmt, ...) {
+        va_list args;
+        va_start(args, fmt);
+
+        va_list args_copy;
+        va_copy(args_copy, args);
+        const int len = vsnprintf(nullptr, 0, fmt, args_copy);
+        va_end(args_copy);
+
+        // return a formatted string without risking memory mismanagement
+        // and without assuming any Compiler or Platform specific behavior
+        Vec<char> zc(len + 1);
+        vsnprintf(zc.data(), zc.size(), fmt, args);
+        va_end(args);
+        return Str(zc.data(), len);
+    }
+
+    void log(LogLevel level, const char *file, int line, Str msg) {
+        std::cerr << LOG_LEVEL_DISPLAY[level] << ": ";
+        std::cerr << file << ":" << line << ": " << msg << std::endl;
+    }
+
+    bool on_errc_impl(std::error_code &ec, Str msg) {
+        if (ec.value() != 0) {
+            std::cerr << "ERROR: " << msg << "- (" << ec.value() << ")"
+                      << "Reason: " << ec.category().name() << " - " << ec.message() << std::endl;
+            ec.clear();
+            return false;
+        }
+        return true;
+    }
+
+    Str &ltrim(std::string &s) {
+        s.erase(s.begin(), find_if_not(s.begin(), s.end(), ::isspace));
+        return s;
+    }
+    Str &rtrim(std::string &s) {
+        s.erase(find_if_not(s.rbegin(), s.rend(), ::isspace).base(), s.end());
+        return s;
+    }
+    Str &trim(std::string &s) { return ltrim(rtrim(s)); }
+    // trim from both ends (copying)
+    std::string  trim_copy(std::string s) { return trim(s); }
+
+    Vec<StrView> split(const StrView s, StrView delim) {
+        size_t       pos_start = 0, pos_end, delim_len = delim.length();
+        StrView      token;
+        Vec<StrView> res;
+
+        while ((pos_end = s.find(delim, pos_start)) != StrView::npos) {
+            token     = s.substr(pos_start, pos_end - pos_start);
+            pos_start = pos_end + delim_len;
+            res.push_back(token);
+        }
+        res.push_back(s.substr(pos_start));
+        return res;
+    }
+
+    bool file_rename(const Str old_path, const Str new_path) {
         CB_INFO("renaming %s -> %s", old_path.c_str(), new_path.c_str());
         std::error_code ec;
         fs::rename(old_path, new_path, ec);
@@ -581,7 +657,8 @@ namespace cb {
 
     bool file_exists(const fs::path &file_path) {
         std::error_code ec;
-        return (fs::exists(file_path, ec)) && on_errc(ec, "Failed to check if file: '%s' is exists", file_path.c_str());
+        auto            exists = fs::exists(file_path, ec);
+        return exists && on_errc(ec, "Failed to check if file: '%s' is exists", file_path.c_str());
     }
 
     bool rebuild_self(int argc, char *argv[], const char *source_path) {
@@ -591,25 +668,25 @@ namespace cb {
 
         if (return_status == nr_status::ERR) return false;
         if (return_status == nr_status::YES) {
-            auto binary_path_renamed = str_t(binary_path) + ".old";
-            if (!rename(binary_path, binary_path_renamed)) return false;
-            cmd_t rebuild({CB_REBUILD_ARGS(binary_path, source_path)});
-            bool  rebuild_succeeded = cmd_run_sync(rebuild);
+            auto binary_path_renamed = Str(binary_path) + ".old";
+            if (!file_rename(binary_path, binary_path_renamed)) return false;
+            Cmd  rebuild({CB_REBUILD_ARGS(binary_path, source_path)});
+            bool rebuild_succeeded = cmd_run(rebuild);
 
             if (!rebuild_succeeded) {
-                rename(binary_path_renamed, binary_path);
+                file_rename(binary_path_renamed, binary_path);
                 return false;
             }
 
-            cmd_t cmd(&argv[0], argv + argc);
-            if (!cmd_run_sync(cmd)) return false;
+            Cmd cmd(&argv[0], argv + argc);
+            if (!cmd_run(cmd)) return false;
             exit(0);
         }
         return true;
     }
 
     /// impl os operation /////////////////////////////////////////////
-    static bool mkdir_if_not_exists(const fs::path &path) {
+    bool mkdir_if_not_exists(const fs::path &path) {
         if (file_exists(path)) return true;
 
         CB_INFO("Creating directory '%s'", path.c_str());
@@ -618,31 +695,29 @@ namespace cb {
         return on_errc(ec, "Failed to create directory '%s'", path.c_str());
     }
 
-    static bool remove_dir_if_exists(const fs::path &dirpath) {
+    bool remove_dir_if_exists(const fs::path &dirpath) {
         CB_INFO("Removing directory '%s'", dirpath.c_str());
         std::error_code ec;
         fs::remove_all(dirpath, ec);
         return on_errc(ec, "Failed to remove directory '%s'", dirpath.c_str());
     }
 
-    static bool copy_file(const char *dst_path, const char *src_path) {
+    bool copy_file(const Str &dst_path, const Str &src_path) {
         using fs::copy_options;
-        CB_INFO("Copying file from: %s => %s", src_path, dst_path);
+        CB_INFO("Copying file from: %s => %s", src_path.c_str(), dst_path.c_str());
         std::error_code ec;
         auto            options = copy_options::update_existing | copy_options::overwrite_existing;
         fs::copy_file(src_path, dst_path, options, ec);
-        return on_errc(ec, "Failed to copy file from '%s' => '%s'", src_path, dst_path);
+        return on_errc(ec, "Failed to copy file from '%s' => '%s'", src_path.c_str(), dst_path.c_str());
     }
 
     bool current_path(fs::path &out_path, const char *optional_append_path) {
         std::error_code ec;
         out_path = fs::current_path(ec);
-        if (optional_append_path) {
-            out_path.append(optional_append_path);
-        }
+        if (optional_append_path) out_path.append(optional_append_path);
         return on_errc(ec, "Failed to get current path");
     }
-    static fs::path path_to_absolute(const fs::path &path) {
+    fs::path path_to_absolute(const fs::path &path) {
         std::error_code ec;
         auto            out = fs::absolute(path, ec);
         on_errc(ec, "Failed to get abosulte path for '%s'", path.c_str());
@@ -650,22 +725,21 @@ namespace cb {
     }
 
     bool home_dir(fs::path &out_path, const char *optional_append_path) {
-        // TODO: implement windows equivalent
-        char *home = NULL;
+        char *home = nullptr;
 #    if !defined(CB_WINDOWS)
-        if ((home = getenv("HOME")) == NULL) {
+        if ((home = getenv("HOME")) == nullptr) {
             home = getpwuid(getuid())->pw_dir;
-            if (home == NULL) CB_BAIL_ERROR(return false, "Failed to get Home directory!");
+            if (home == nullptr) CB_BAIL_ERROR(return false, "Failed to get Home directory!");
         }
         out_path = home;
 #    else
-        if ((home = getenv("USERPROFILE")) == NULL) {
+        if ((home = getenv("USERPROFILE")) == nullptr) {
             CB_ERROR(
                 "Failed to get env `USERPROFILE` try to get env `HOMEDRIVE` and "
                 "`HOMEPATH`");
             char *drive = getenv("HOMEDRIVE");
             char *path  = getenv("HOMEPATH");
-            if ((drive == NULL) || (path == NULL))
+            if ((drive == nullptr) || (path == nullptr))
                 CB_BAIL_ERROR(return false,
                                      "Failed to get env `HOMEDRIVE` or `HOMEPATH` "
                                      "to get fullpath to home directory");
@@ -677,26 +751,21 @@ namespace cb {
         return true;
     }
 
-    bool chmod(const fs::path &file, unsigned int octal_mode) {
+    bool set_permissions(const fs::path &file, fs::perms permissions) {
         std::error_code ec;
-        fs::permissions(file, fs::perms(octal_mode), ec);
+        fs::permissions(file, permissions, ec);
         return on_errc(ec, "Failed to set permission for file '%s'", file.c_str());
-    }
-
-    fs::file_status get_file_status(const fs::path &path) {
-        std::error_code ec;
-        auto            s = fs::status(path, ec);
-        on_errc(ec, "Failed to get file status for '%s'", path.c_str());
-        return s;
     }
 
     bool walkdir(const fs::path &parent, bool recursive, WalkdirCallback callback) {
         bool result = true;
         DIR *dir    = opendir(parent.c_str());
-        if (dir == NULL) CB_BAIL_ERROR(return false, "Could not open directory %s: %s", parent.c_str(), strerror(errno));
+        if (dir == nullptr) CB_BAIL_ERROR(return false, "Could not open directory %s: %s", parent.c_str(), strerror(errno));
+        defer { closedir(dir); };
+
         fs::path       path;
-        struct dirent *ent = NULL;
-        while ((ent = readdir(dir)) != NULL) {
+        struct dirent *ent = nullptr;
+        while ((ent = readdir(dir)) != nullptr) {
             if (ent->d_name[0] == '.') continue;
             if ((strcmp(ent->d_name, ".") == 0) || (strcmp(ent->d_name, "..") == 0)) continue;
             path = parent;
@@ -708,22 +777,20 @@ namespace cb {
             }
             if (fs::is_directory(path) && (recursive == true)) result &= walkdir(path, recursive, callback);
         }
-
-        if (dir) closedir(dir);
         return result;
     }
 
     /// impl cb_proc_t | cb_procs_t /////////////////////////////////////////////
-    bool procs_wait(const procs_t &procs) { return std::all_of(procs.begin(), procs.end(), proc_wait); }
+    bool procs_wait(const Procs &procs) { return std::all_of(procs.begin(), procs.end(), proc_wait); }
     bool proc_wait(proc_t proc) {
         if (proc == CB_INVALID_PROC) return false;
 #    ifdef CB_WINDOWS
+        defer { CloseHandle(proc); };
         DWORD result = WaitForSingleObject(proc, INFINITE);
         if (result == WAIT_FAILED) CB_BAIL_ERROR(return false, "could not wait on child process: %lu", GetLastError());
         DWORD exit_status;
         if (!GetExitCodeProcess(proc, &exit_status)) CB_BAIL_ERROR(return false, "could not get process exit code: %lu", GetLastError());
         if (exit_status != 0) CB_BAIL_ERROR(return false, "command exited with exit code %lu", exit_status);
-        CloseHandle(proc);
 #    else
         for (;;) {
             int wstatus = 0;
@@ -739,13 +806,13 @@ namespace cb {
 #    endif
     }
     /// impl cb_cmd_t /////////////////////////////////////////////
-    proc_t cmd_run_async(cmd_t &cmd) {
+    proc_t cmd_run_async(Cmd &cmd) {
         if (cmd.size() < 1) CB_BAIL_ERROR(return CB_INVALID_PROC, "Could not run empty command");
 
         fprintf(stderr, "CMD: ");
         for (size_t i = 0; i < cmd.size(); ++i) {
             const char *arg = cmd[i];
-            if (arg == NULL) break;
+            if (arg == nullptr) break;
             if (i > 0) fprintf(stderr, " ");
             if (!strchr(arg, ' ')) {
                 fprintf(stderr, "%s", arg);
@@ -761,7 +828,7 @@ namespace cb {
         STARTUPINFO siStartInfo;
         ZeroMemory(&siStartInfo, sizeof(siStartInfo));
         siStartInfo.cb         = sizeof(STARTUPINFO);
-        // NOTE: theoretically setting NULL to std handles should not be a problem
+        // NOTE: theoretically setting nullptr to std handles should not be a problem
         // https://docs.microsoft.com/en-us/windows/console/getstdhandle?redirectedfrom=MSDN#attachdetach-behavior
         // TODO: check for errors in GetStdHandle
         siStartInfo.hStdError  = GetStdHandle(STD_ERROR_HANDLE);
@@ -771,22 +838,22 @@ namespace cb {
 
         PROCESS_INFORMATION piProcInfo;
         ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
+        defer { CloseHandle(piProcInfo.hThread); };
 
         std::string sb;
         std::for_each(cmd.begin(), cmd.end(), [&](const char *&piece) {
             sb += piece;
             sb += " ";
         });
-        BOOL bSuccess = CreateProcessA(NULL, sb.c_str(), NULL, NULL, TRUE, 0, NULL, NULL, &siStartInfo, &piProcInfo);
+        BOOL bSuccess = CreateProcessA(nullptr, sb.c_str(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &siStartInfo, &piProcInfo);
 
         if (!bSuccess) CB_BAIL_ERROR(return CB_INVALID_PROC, "Could not create child process: %lu", GetLastError());
-        CloseHandle(piProcInfo.hThread);
         return piProcInfo.hProcess;
 #    else
         pid_t cpid = fork();
         if (cpid < 0) CB_BAIL_ERROR(return CB_INVALID_PROC, "Could not fork child process: %s", strerror(errno));
         if (cpid == 0) {
-            cmd.push_back(NULL);
+            cmd.push_back(nullptr);
             if (execvp(cmd[0], (char *const *)cmd.data()) < 0) CB_BAIL_ERROR(exit(1), "Could not exec child process: %s", strerror(errno));
             CB_ASSERT(false, "unreachable");
         }
@@ -794,23 +861,29 @@ namespace cb {
 #    endif
     }
 
-    bool cmd_run_sync(cmd_t &cmd) {
+    bool cmd_run(Cmd &cmd) {
         proc_t p = cmd_run_async(cmd);
         if (p == CB_INVALID_PROC) return false;
         return proc_wait(p);
     }
 
-    Status popen_stdout(const str_t &cmd, str_t &stdout_content) {
+    Status popen_stdout(const Str &cmd, Str &stdout_content) {
         char buffer[1 << 10] = {0};
 #    ifdef CB_WINDOWS
         HANDLE              stdout_read_;
         HANDLE              stdout_write_;
         STARTUPINFO         si;
         PROCESS_INFORMATION pi_info;
+        defer {
+            CloseHandle(stdout_read_);
+            CloseHandle(stdout_write_);
+            CloseHandle(pi_info.hProcess);
+            CloseHandle(pi_info.hThread);
+        };
 
         // Create pipes for stdout
-        SECURITY_ATTRIBUTES sa = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
-        if (!CreatePipe(&stdout_read_, &stdout_write_, &sa, 0)) CB_BAIL_ERROR(cb_return_defer(status::ERR), "Error creating pipes on Windows");
+        SECURITY_ATTRIBUTES sa = {sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+        if (!CreatePipe(&stdout_read_, &stdout_write_, &sa, 0)) CB_BAIL_ERROR(return status::ERR, "Error creating pipes on Windows");
 
         ZeroMemory(&si, sizeof(STARTUPINFO));
         si.cb         = sizeof(STARTUPINFO);
@@ -820,16 +893,11 @@ namespace cb {
         si.dwFlags |= STARTF_USESTDHANDLES;
 
         ZeroMemory(&pi_info, sizeof(PROCESS_INFORMATION));
-        if (!CreateProcessA(NULL, cmd.c_str(), NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi_info))
-            CB_BAIL_ERROR(cb_return_defer(status::ERR), "Could not create child process: %lu", GetLastError());
+        if (!CreateProcessA(nullptr, cmd.c_str(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi_info))
+            CB_BAIL_ERROR(return status::ERR, "Could not create child process: %lu", GetLastError());
 
         DWORD bytesRead = 0;
-        while (ReadFile(stdout_read_, buffer, 1 << 10, &bytesRead, NULL) && bytesRead > 0) stdout_content.append(buffer, bytesRead);
-
-        CloseHandle(stdout_read_);
-        CloseHandle(stdout_write_);
-        CloseHandle(pi_info.hProcess);
-        CloseHandle(pi_info.hThread);
+        while (ReadFile(stdout_read_, buffer, 1 << 10, &bytesRead, nullptr) && bytesRead > 0) stdout_content.append(buffer, bytesRead);
 #    else
         int   stdout_pipe[2];
         pid_t pid_proc;
@@ -842,31 +910,43 @@ namespace cb {
             close(stdout_pipe[0]);
             close(stdout_pipe[1]);
 
-            cmd_t cmds{"/bin/sh", "-c", cmd.c_str(), NULL};
+            Cmd cmds{"/bin/sh", "-c", cmd.c_str(), nullptr};
             if (execvp(cmds[0], (char *const *)cmds.data()) < 0) CB_BAIL_ERROR(exit(EXIT_FAILURE), "Could not exec child process: %s", strerror(errno));
             exit(EXIT_SUCCESS);
         } else {  // Parent process
             close(stdout_pipe[1]);
         }
+        defer {
+            close(stdout_pipe[0]);
+            if (pid_proc > 0) waitpid(pid_proc, nullptr, 0);
+        };
         ssize_t bytes_read = 0;
         while ((bytes_read = read(stdout_pipe[0], buffer, 1 << 10)) > 0) stdout_content.append(buffer, bytes_read);
 
-        close(stdout_pipe[0]);
-        if (pid_proc > 0) waitpid(pid_proc, NULL, 0);
 #    endif  // CB_WINDOWS
         return Status::OK;
     }
 
-    static inline void print_help(const map_t<strview_t, callbacks_cb_t> &callbacks) {
+    static inline void print_help(const Map<StrView, callbacks_cb_t> &callbacks) {
         fprintf(stderr, "USAGE: %*s <SUBCOMMAND> [OPTIONS]" CB_LINE_END, SVArg(program_name));
-        for (const auto [key, _] : callbacks) fprintf(stderr, "   %*s %*s" CB_LINE_END, SVArg(program_name), SVArg(key));
+        for (const auto &[key, _] : callbacks) fprintf(stderr, "   %*s %*s" CB_LINE_END, SVArg(program_name), SVArg(key));
         fprintf(stderr, CB_LINE_END "OPTIONS: " CB_LINE_END);
-        fprintf(stderr, "   -ct, --compiler_type    set Compiler type   [clang, gnu, msvc] (defualt same as `cb.h` compiles to)" CB_LINE_END);
-        fprintf(stderr, "   -cc, --Compiler         set Compiler        [path_to_compiler] (default will search Compiler type)" CB_LINE_END);
-        fprintf(stderr, "   -b,  --build            set build type      [debug, release, relwithdebinfo]  (default to 'debug')" CB_LINE_END);
+        fprintf(stderr,
+                "   -ct, --compiler_type    set Compiler type   [clang, gnu, msvc] (defualt same as `cb.h` compiles "
+                "to)" CB_LINE_END);
+        fprintf(stderr,
+                "   -c, --compiler          set Compiler        [path_to_compiler] (default will search Compiler "
+                "type)" CB_LINE_END);
+        fprintf(stderr,
+                "   -b,  --build            set build type      [debug, release, relwithdebinfo]  (default to "
+                "'debug')" CB_LINE_END);
         fprintf(stderr, "   -p,  --program          set program type    [C, CPP] (default to 'C')" CB_LINE_END);
-        fprintf(stderr, "   -t,  --target           set target OS type  [windows, macos, unix] (default to current run OS)" CB_LINE_END);
-        fprintf(stderr, "   -a,  --arch             set architecture    [X64, X86, ARM64, ARM32] (default to current run arch)" CB_LINE_END);
+        fprintf(stderr,
+                "   -t,  --target           set target OS type  [windows, macos, unix] (default to current run "
+                "OS)" CB_LINE_END);
+        fprintf(stderr,
+                "   -a,  --arch             set architecture    [X64, X86, ARM64, ARM32] (default to current run "
+                "arch)" CB_LINE_END);
         fprintf(stderr, "   -h,  --help             print this help text" CB_LINE_END);
         fprintf(stderr, "   -q,  --quite            set output to quite" CB_LINE_END);
         fprintf(stderr, "   -d,  --display          display config  and target, will not start process" CB_LINE_END);
@@ -878,31 +958,26 @@ namespace cb {
 #    define opt(l)     (arg == l)
 #    define opts(s, l) ((arg == s) || (arg == l))
 
-    Config::Config(const str_t &name)
-        : SerializeDeserialize()
-        , build_type(Build::DEBUG)
-        , platform_kind(CB_DEFAULT_PLATFORM)
-        , arch_kind(Arch::X64)
-        , compiler_type(CB_DEFAULT_COMPILER)
-        , program_type(Program::C)
-        , subcmd("")
-        , project_name(name) {
-        if (!current_path(project_path)) {
-            project_path = "./";
+    Config Config::create(const Str &name) {
+        Config cfg;
+        cfg.project_name = name;
+        if (!current_path(cfg.project_path)) {
+            cfg.project_path = "./";
         };
-        build_path = project_path;
-        build_path.append("build");
+        cfg.build_path = cfg.project_path;
+        cfg.build_path.append("build");
 
-        build_artifact_path = build_path;
-        build_artifact_path.append(((is_release()) ? "release" : "debug"));
+        cfg.build_artifact_path = cfg.build_path;
+        cfg.build_artifact_path.append(((cfg.is_release()) ? "release" : "debug"));
 
-        config_path = build_path;
-        config_path.append("config.cb");
+        cfg.config_path = cfg.build_path;
+        cfg.config_path.append("config.cb");
 
-        targets_path = build_path;
-        targets_path.append("targets.bin");
+        cfg.targets_path = cfg.build_path;
+        cfg.targets_path.append("targets.cb");
 
-        set_install_prefix(is_windows() ? "c:\\Program Files\\${PROJECT_NAME}" : "/usr");
+        cfg.set_install_prefix(cfg.is_windows() ? "c:\\Program Files\\${PROJECT_NAME}" : "/usr");
+        return cfg;
     }
 
     void Config::set_install_prefix(const fs::path &prefix) {
@@ -922,7 +997,7 @@ namespace cb {
         this->compiler_path = cpath;
     }
 
-    bool Config::parse_from_args(const vec_t<strview_t> args, const map_t<strview_t, callbacks_cb_t> &callbacks) {
+    bool Config::parse_from_args(const Vec<StrView> args, const Map<StrView, callbacks_cb_t> &callbacks) {
         program_name = args.front();
 
         if (file_exists(config_path)) {
@@ -934,6 +1009,7 @@ namespace cb {
             if (save(config_path) == Status::OK) return false;
             CB_INFO("Success save default config to '%s'", config_path.c_str());
         }
+        Compiler last_ct = compiler_type;
         for (auto it = args.begin() + 1; it != args.end(); it++) {
             auto arg = *it;
             if (arg[0] != '-') {
@@ -949,14 +1025,15 @@ namespace cb {
                 print_help(callbacks);
                 return true;
             }
+            else if opts ("-db", "--compile-commands"   ) dump_compile_command = true;
             else if ((it+1) != args.end()) {
                 auto arg_next = *(++it);
-                if      opts ("-c", "--Compiler"       ) compiler_path = arg_next;
-                else if opts ("-ct", "--compiler_type" ) compiler_type = COMPILER_DISPLAY.parse(arg_next);
-                else if opts ("-", "--build"           ) build_type    = BUILD_TYPE_DISPLAY.parse(arg_next);
-                else if opts ("-p", "--program"        ) program_type  = PROGRAM_DISPLAY.parse(arg_next);
-                else if opts ("-t", "--target"         ) platform_kind = PLATFORM_DISPLAY.parse(arg_next);
-                else if opts ("-a", "--arch"           ) arch_kind     = ARCH_DISPLAY.parse(arg_next);
+                if      opts ("-c", "--compiler"            ) compiler_path = arg_next;
+                else if opts ("-ct", "--compiler_type"      ) compiler_type = COMPILER_DISPLAY.parse(arg_next);
+                else if opts ("-", "--build"                ) build_type    = BUILD_TYPE_DISPLAY.parse(arg_next);
+                else if opts ("-p", "--program"             ) program_type  = PROGRAM_DISPLAY.parse(arg_next);
+                else if opts ("-t", "--target"              ) platform_kind = PLATFORM_DISPLAY.parse(arg_next);
+                else if opts ("-a", "--arch"                ) arch_kind     = ARCH_DISPLAY.parse(arg_next);
                 else {
                     CB_ERROR("unknown arguments: '" SVFmt "' <" SVFmt ">", SVArg(arg), SVArg(arg_next));
                     print_help(callbacks);
@@ -970,7 +1047,7 @@ namespace cb {
             // clang-format on
         }
 
-        if (compiler_path.empty()) find_compiler(compiler_path, *this);
+        if (compiler_path.empty() || last_ct != compiler_type) find_compiler(compiler_path, *this);
         if (is_changed()) {
             CB_INFO("Configuration changed, saving config to '%s'", config_path.c_str());
             return save(config_path) == Status::OK;
@@ -996,9 +1073,7 @@ namespace cb {
         return out.good();
     }
     // clang-format off
-    bool Config::deserialize_key_value(str_t &key, str_t &v) {
-        trim(key);
-        trim(v);
+    bool Config::deserialize_key_value(Str &key, Str &v) {
         if      (key == "build_type")           build_type      = BUILD_TYPE_DISPLAY.parse(v);
         else if (key == "Platform")             platform_kind   = PLATFORM_DISPLAY.parse(v);
         else if (key == "arch")                 arch_kind       = ARCH_DISPLAY.parse(v);
@@ -1069,23 +1144,22 @@ namespace cb {
     }
     bool Config::is_changed() const { return hash() != __hash; }
 
-    Source::Source(const fs::path &dir, const fs::path &src) : source(path_to_absolute(src)), output(dir) {
-        output.append(source.filename().c_str());
-        output.replace_extension(".o");
+    Source::Source(const fs::path &dir, const fs::path &src) : src(path_to_absolute(src)), out(dir) {
+        out.append(src.filename().c_str());
+        out.replace_extension(".o");
     }
 
-    Target::Target(str_t name, TargetType type, const Config &cfg) : SerializeDeserialize(), type(type), name(name), flags(), includes(), ldflags(), sources() {
-        if (type == TargetType::SYSTEM_LIB) return;
+    Target::Target(Str name, TargetType ty, const Config &cfg) : SerializeDeserialize(), type(ty), name(name), flags(), ldflags(), sources() {
         output_dir = cfg.build_artifact_path;
         output_dir.append(name);
-        output          = output_dir;
+        file.out        = output_dir;
 
-        const char *ext = cfg.get_ext(type);
-        if (TargetType::STATIC_LIB == type || type == TargetType::DYNAMIC_LIB) {
-            output.append(str_t("lib") + name.data());
-            output.replace_extension(ext);
-        } else {
-            output.append(name);
+        const char *ext = cfg.get_ext(ty);
+        if (TargetType::STATIC_LIB == ty || ty == TargetType::DYNAMIC_LIB) {
+            file.out.append(Str("lib") + name.data());
+            file.out.replace_extension(ext);
+        } else if (ty == TargetType::EXEC) {
+            file.out.append(name);
         }
     }
 
@@ -1097,50 +1171,49 @@ namespace cb {
         return ret ? Status::OK : Status::ERR;
     }
 
-    inline void serialize_vec_source(std::ostream &out, const char *name, const vec_t<Source> &vecs) {
+    inline void serialize_vec_source(std::ostream &out, const char *name, const Vec<Source> &vecs) {
         out << name;
         for (size_t i = 0; i < vecs.size(); i++) {
             const auto &s = vecs[i];
-            out << '{' << s.source.c_str() << ',' << s.output.c_str() << '}';
+            out << '{' << (s.src.empty() ? "" : s.src.string()) << ',';
+            out << (s.out.empty() ? "" : s.out.string()) << '}';
             if (i < vecs.size() - 1) {
                 out << ',';
             }
         }
         out << std::endl;
     }
-    inline void serialize_vec_str(std::ostream &out, const char *name, const vec_t<str_t> &vecs) {
+    inline void serialize_vec_str(std::ostream &out, const char *name, const Vec<Str> &vecs) {
         out << name;
         for (size_t i = 0; i < vecs.size(); i++) {
-            out << vecs[i];
+            out << (vecs[i].empty() ? "" : vecs[i]);
             if (i < vecs.size() - 1) {
                 out << ',';
             }
         }
         out << std::endl;
     }
-    inline void deserialize_vec_source(const str_t &v, vec_t<Source> &out) {
+    inline void deserialize_vec_source(const Str &v, Vec<Source> &out) {
         size_t open  = v.find('{');
         size_t close = 0;
-        while (open != str_t::npos && close != str_t::npos) {
+        while (open != Str::npos && close != Str::npos) {
             close       = v.find('}', open + 1);
             auto inside = v.substr(open + 1, close - open - 1);
-            trim(inside);
-            if (auto comma = inside.find_first_of(','); comma != str_t::npos) {
-                Source source;
-                source.source = trim_copy(inside.substr(0, comma));
-                source.output = trim_copy(inside.substr(comma + 1));
-                out.push_back(source);
+            if (auto comma = trim(inside).find_first_of(','); comma != Str::npos) {
+                Source src;
+                src.src = trim_copy(inside.substr(0, comma));
+                src.out = trim_copy(inside.substr(comma + 1));
+                out.push_back(src);
             }
             open = v.find('{', close);
         }
     }
-    inline void deserialize_vec_str(const str_t &v, vec_t<str_t> &out) {
+    inline void deserialize_vec_str(const Str &v, Vec<Str> &out) {
         size_t start = 0;
         size_t end;
         while ((end = v.find(',', start)) != std::string::npos) {
             auto s = v.substr(start, end - start);
-            trim(s);
-            out.push_back(s);
+            out.push_back(trim(s));
             start = end + 1;  // Move to the next character after the comma
         }
         // Add the last substring (or the only substring if there are no commas)
@@ -1148,37 +1221,36 @@ namespace cb {
     }
 
     bool Target::serialize(std::ostream &out) {
-        out << "target.type=" << TARGET_TYPE_DISPLAY[this->type] << std::endl;
-        out << "target.name=" << this->name << std::endl;
-        out << "target.output_dir=" << this->output_dir.c_str() << std::endl;
-        out << "target.output=" << this->output.c_str() << std::endl;
+        auto ty_dpy = TARGET_TYPE_DISPLAY[type];
+        out << "target.type=" << ty_dpy << std::endl;
+        out << "target.name=" << (name.empty() ? "" : name) << std::endl;
+        out << "target.output_dir=" << (output_dir.empty() ? "" : output_dir.string()) << std::endl;
+        out << "target.output=" << (file.out.empty() ? "" : file.out.string()) << std::endl;
+        out << "target.source=" << (file.src.empty() ? "" : file.src.string()) << std::endl;
         serialize_vec_str(out, "target.flags=", this->flags);
-        serialize_vec_str(out, "target.includes=", this->includes);
         serialize_vec_str(out, "target.ldflags=", this->ldflags);
         serialize_vec_source(out, "target.sources=", this->sources);
 
         return out.good();
     }
-    bool Target::deserialize_key_value(str_t &key, str_t &value) {
-        trim(key);
-        trim(value);
+    bool Target::deserialize_key_value(Str &key, Str &value) {
         if (key == "target.type") this->type = TARGET_TYPE_DISPLAY.parse(value);
         if (key == "target.name") this->name = value;
         if (key == "target.output_dir") this->output_dir = value;
-        if (key == "target.output") this->output_dir = value;
+        if (key == "target.output") this->file.out = value;
+        if (key == "target.source") this->file.src = value;
         if (key == "target.flags") deserialize_vec_str(value, this->flags);
-        if (key == "target.includes") deserialize_vec_str(value, this->includes);
         if (key == "target.ldflags") deserialize_vec_str(value, this->ldflags);
         if (key == "target.sources") deserialize_vec_source(value, this->sources);
         return true;
     }
 
-    Status Target::link_library(const std::shared_ptr<Target> &tgt) {
+    Status Target::link_library(const std::shared_ptr<Target> tgt) {
         switch (tgt->type) {
             case TargetType::SYSTEM_LIB: {
                 for (const auto &ld : tgt->ldflags) {
                     if (ld.compare(0, 2, "-I") == 0) {
-                        includes.push_back(ld);
+                        flags.push_back(ld);
                     } else {
                         ldflags.push_back(ld);
                     }
@@ -1188,24 +1260,24 @@ namespace cb {
             case TargetType::DYNAMIC_LIB: {
                 ldflags.insert(ldflags.end(), tgt->ldflags.begin(), tgt->ldflags.end());
                 ldflags.insert(flags.end(), tgt->flags.begin(), tgt->flags.end());
-                ldflags.insert(includes.end(), tgt->includes.begin(), tgt->includes.end());
-                add_flags(str_t(str_t("-L") + tgt->name.data()), str_t(str_t("-l") + tgt->output.c_str()));
+                add_flags(Str(Str("-L") + tgt->name.data()), Str(Str("-l") + tgt->file.out.c_str()));
             } break;
             default: CB_ASSERT(false, "cb_target_link_library does not accept lib->type thats not equal to library type"); break;
         }
         return Status::OK;
     }
 
-    cmd_t Target::into_cmd(const Config &cfg) {
-        cmd_t c;
+    Cmd Target::into_cmd(const Config &cfg) {
+        Cmd c;
         c.push_back(cfg.compiler_path.c_str());
-        auto str_inserter = [&](const str_t &s) { c.push_back(s.c_str()); };
+        auto str_inserter = [&](const Str &s) { c.push_back(s.c_str()); };
         std::for_each(flags.begin(), flags.end(), str_inserter);
-        std::for_each(includes.begin(), includes.end(), str_inserter);
-        c.push_back("-o");
-        c.push_back(output.c_str());
+        if (!file.src.empty()) c.push_back(file.src.c_str());
 
-        std::for_each(sources.begin(), sources.end(), [&](const Source &s) { c.push_back(s.output.c_str()); });
+        c.push_back("-o");
+        c.push_back(file.out.c_str());
+
+        std::for_each(sources.begin(), sources.end(), [&](const Source &s) { c.push_back(s.out.c_str()); });
         std::for_each(ldflags.begin(), ldflags.end(), str_inserter);
 
         return c;
@@ -1214,19 +1286,18 @@ namespace cb {
     Status Target::run(const Config &cfg) {
         if (!this->need_rebuild()) return Status::OK;
         CB_INFO("Running target %*s", (int)name.size(), name.data());
-        Status  result = Status::OK;
+        Status result = Status::OK;
 
-        cmd_t   cmd{cfg.compiler_path.c_str()};
-        procs_t procs;
+        Cmd    cmd{cfg.compiler_path.c_str()};
+        Procs  procs;
 
-        auto    str_inserter = [&](const str_t &s) { cmd.push_back(s.c_str()); };
+        auto   str_inserter = [&](const Str &s) { cmd.push_back(s.c_str()); };
         std::for_each(flags.begin(), flags.end(), str_inserter);
-        std::for_each(includes.begin(), includes.end(), str_inserter);
         size_t save_idx = cmd.size();
 
         for (const auto &s : sources) {
             if (!s.need_rebuild()) continue;
-            cmd.insert(cmd.end(), {"-o", s.output.c_str(), "-c", s.source.c_str()});
+            cmd.insert(cmd.end(), {"-o", s.out.c_str(), "-c", s.src.c_str()});
             proc_t p = cmd_run_async(cmd);
             if (p == CB_INVALID_PROC) {
                 CB_ERROR("cmd_run_async returned invalid proc");
@@ -1240,8 +1311,22 @@ namespace cb {
         if (result == Status::ERR) return result;
 
         cmd = this->into_cmd(cfg);
-        if (!cmd_run_sync(cmd)) CB_BAIL_ERROR(return Status::ERR, "Failed to run sync cmd");
+        if (!cmd_run(cmd)) CB_BAIL_ERROR(return Status::ERR, "Failed to run sync cmd");
         return result;
+    }
+
+    constexpr fs::perms EXEC_PERMS =
+        (fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec | fs::perms::others_read | fs::perms::others_exec) & fs::perms::mask;
+    Status Target::install(fs::path install_path) {
+        if (file.out.empty() || !file_exists(file.out)) {
+            CB_ERROR("File output is empty or not exists for target '%s'", name.c_str());
+            CB_ERROR("build it first before installing!");
+            return Status::ERR;
+        }
+        install_path.append(this->name);
+        if (!cb::copy_file(install_path, file.out)) return Status::ERR;
+        if (type == TargetType::EXEC) set_permissions(install_path, EXEC_PERMS);
+        return Status::OK;
     }
 
     size_t target_hash::operator()(const Target &tg) const noexcept {
@@ -1249,47 +1334,48 @@ namespace cb {
         hash_combine(seed, tg.type);
         hash_combine(seed, tg.name);
         hash_combine(seed, tg.output_dir);
-        hash_combine(seed, tg.output);
+        hash_combine(seed, tg.file.out);
+        hash_combine(seed, tg.file.src);
         for (const auto &flag : tg.flags) hash_combine(seed, flag);
-        for (const auto &include : tg.includes) hash_combine(seed, include);
         for (const auto &ldflag : tg.ldflags) hash_combine(seed, ldflag);
         for (const auto &[source, output] : tg.sources) hash_combine(seed, source, output);
         return seed;
     }
 
-    Cb::Cb(const char *name) : cfg(name), targets(), callbacks() {
-        callbacks.insert({"build", Cb::m_on_build_target});
-        callbacks.insert({"config", Cb::m_on_config_target});
-        callbacks.insert({"clean", Cb::m_on_clean_target});
-        callbacks.insert({"install", Cb::m_on_install_target});
-    }
+    Cb::Cb(const char *name) : cfg(Config::create(name)), targets(), callbacks() {}
 
-    std::shared_ptr<Target> Cb::create_target(str_t name, TargetType type) {
+    std::shared_ptr<Target> Cb::create_target(Str name, TargetType type, const fs::path &source) {
         auto tgt = std::make_shared<Target>(name, type, cfg);
+        if (!source.empty()) {
+            if (tgt->add_main_source(source) == Status::ERR) {
+                return nullptr;
+            }
+        }
         return targets.emplace_back(tgt);
     }
-    std::shared_ptr<Target> Cb::create_target_pkgconf(str_t name) {
+
+    std::shared_ptr<Target> Cb::create_target_pkgconf(Str name) {
 #    ifdef CB_WINDOWS
         CB_ERROR("cb_create_target_pkgconf is not supported in windows");
-        return NULL;
+        return nullptr;
 #    else
-        Target tgt(name, TargetType::SYSTEM_LIB, cfg);
-        str_t  cmd("/usr/bin/pkg-config --cflags --libs " + name);
+        auto tgt = std::make_shared<Target>(name, TargetType::SYSTEM_LIB, cfg);
+        Str  cmd("/usr/bin/pkg-config --cflags --libs " + name);
 
-        str_t  contents_buff;
+        Str  contents_buff;
         contents_buff.reserve(2 << 10);
-        if (popen_stdout(cmd, contents_buff) != Status::OK) CB_BAIL_ERROR(return NULL, "Failed to procecss open cmd: '%s'", cmd.c_str());
+        if (popen_stdout(cmd, contents_buff) != Status::OK) CB_BAIL_ERROR(return nullptr, "Failed to procecss open cmd: '%s'", cmd.c_str());
 
         char *data  = contents_buff.data();
-        char *token = NULL;
+        char *token = nullptr;
         token       = strtok(data, " \n\t");
-        while (token != NULL) {
+        while (token != nullptr) {
             if (!(token[0] == '\n' || token[0] == '\t' || token[0] == ' ')) {
-                tgt.ldflags.push_back(token);
+                tgt->ldflags.push_back(token);
             }
-            token = strtok(NULL, " ");
+            token = strtok(nullptr, " ");
         }
-        targets.push_back(std::make_shared<Target>(tgt));
+        targets.push_back(tgt);
         return targets.back();
 #    endif
     }
@@ -1302,50 +1388,66 @@ namespace cb {
                 return Status::ERR;
             }
             out << "target_count=" << targets.size() << std::endl;
-            for (const auto &target : targets) {
-                target->serialize(out);
+            for (size_t i = 0; (i < targets.size()) && out.good(); ++i) {
+                if (!targets[i]->serialize(out)) break;
+                if (i != targets.size() - 1) {
+                    out << "----";
+                }
                 out << std::endl;
             }
+            if (!out.good()) out.exceptions(out.rdstate());
             __source_hashes = source_hash();
+        } catch (const std::ios_base::failure &e) {
+            CB_ERROR("Failed to save target '%s' - [(%d): %s]", cfg.targets_path.c_str(), e.code().value(), e.what());
+            return Status::ERR;
         } catch (const std::exception &e) {
-            CB_ERROR("Failed to save target configuration '%s' - %s", cfg.targets_path.c_str(), e.what());
+            CB_ERROR("Failed to save target '%s' - [%s]", cfg.targets_path.c_str(), e.what());
             return Status::ERR;
         }
         return Status::OK;
+    }
+    static Str read_to_string(std::ifstream &ifs, const fs::path &file) {
+        try {
+            ifs.seekg(0, std::ios::end);
+            std::ifstream::pos_type sz = ifs.tellg();
+            ifs.seekg(0, std::ios::beg);
+            Str bytes(sz, '\0');
+            ifs.read(bytes.data(), sz);
+
+            if (!ifs.good()) ifs.exceptions(ifs.rdstate());
+            return bytes;
+        } catch (const std::exception &e) {
+            CB_ERROR("Failed to load target configuration '%s' - %s", file.c_str(), e.what());
+            return "";
+        }
     }
 
     Status Cb::load_targets() {
         if (!file_exists(cfg.targets_path))
             CB_BAIL_ERROR(return Status::ERR, "no targets available, use command 'config' as subcommand to initiate project configuration");
         try {
-            std::ifstream in(cfg.targets_path);
-            if (!in) {
-                CB_ERROR("Failed to open targets file '%s'", cfg.targets_path.c_str());
-                return Status::ERR;
-            }
-            size_t count = 0;
-            str_t  buf;
-            while (std::getline(in, buf)) {
-                if (buf.empty() || buf.front() == '#') continue;
-                if (auto eq_delim = buf.find_first_of('='); eq_delim != str_t::npos) {
-                    auto key   = buf.substr(0, eq_delim);
-                    auto value = buf.substr(eq_delim + 1);
-                    if (key == "target_count") {
-                        count = std::atol(value.c_str());
-                        this->targets.reserve(count + 1);
-                        break;
-                    } else {
-                        CB_ERROR("expected first key `target_count` but got `%s`", key.c_str());
-                        return Status::ERR;
+            std::ifstream ifs(cfg.targets_path);
+            Str           content         = read_to_string(ifs, cfg.targets_path);
+            Vec<StrView>  targets_content = split(content, "----");
+
+            for (const auto tg : targets_content) {
+                if (tg.empty()) continue;
+                auto target = std::make_shared<Target>();
+                for (const auto line : split(tg, "\n")) {
+                    if (line.empty() || line.front() == '#') continue;
+                    if (auto eq_delim = line.find_first_of('='); eq_delim != StrView::npos) {
+                        Str key{line.substr(0, eq_delim)};
+                        Str value{line.substr(eq_delim + 1)};
+                        if (key == "target_count") {
+                            this->targets.reserve(std::atol(value.c_str()));
+                            continue;
+                        }
+                        target->deserialize_key_value(key, value);
                     }
                 }
+                this->targets.push_back(target);
             }
-            for (size_t i = 0; i < count; i++) {
-                auto target = std::make_shared<Target>();
-                if (target->deserialize(in)) {
-                    this->targets.push_back(target);
-                }
-            }
+
             __source_hashes = source_hash();
         } catch (const std::exception &e) {
             CB_ERROR("Failed to load target configuration '%s' - %s", cfg.targets_path.c_str(), e.what());
@@ -1355,7 +1457,7 @@ namespace cb {
     }
 
     template <typename V>
-    static inline void display_vec(const char *name, const vec_t<V> values, std::function<void(const V &)> on_values) {
+    static inline void display_vec(const char *name, const Vec<V> values, std::function<void(const V &)> on_values) {
         printf("cb.targets.%s    = [", name);
         for (size_t fl = 0; fl < values.size(); fl++) {
             on_values(values[fl]);
@@ -1369,17 +1471,18 @@ namespace cb {
         printf("cb.targets.count    = %zu" CB_LINE_END, targets.size());
         for (const auto &t : targets) {
             printf("=====================================================" CB_LINE_END);
-            printf("cb.targets.type       = %s" CB_LINE_END, TARGET_TYPE_DISPLAY[t->type]);
+            Str type = TARGET_TYPE_DISPLAY[t->type];
+            printf("cb.targets.type       = %s" CB_LINE_END, type.c_str());
             printf("cb.targets.name       = %s" CB_LINE_END, t->name.c_str());
             if (t->type != TargetType::SYSTEM_LIB) {
                 printf("cb.targets.output_dir = '%s'" CB_LINE_END, t->output_dir.c_str());
-                printf("cb.targets.output     = '%s'" CB_LINE_END, t->output.c_str());
+                printf("cb.targets.output     = '%s'" CB_LINE_END, t->file.out.c_str());
+                printf("cb.targets.source     = '%s'" CB_LINE_END, t->file.src.c_str());
             }
-            display_vec<str_t>("flags", t->flags, [](const str_t &v) { printf("%s", v.c_str()); });
-            display_vec<str_t>("ldflags", t->ldflags, [](const str_t &v) { printf("%s", v.c_str()); });
-            display_vec<str_t>("includes", t->includes, [](const str_t &v) { printf("%s", v.c_str()); });
+            display_vec<Str>("flags", t->flags, [](const Str &v) { printf("%s", v.c_str()); });
+            display_vec<Str>("ldflags", t->ldflags, [](const Str &v) { printf("%s", v.c_str()); });
             if (t->type != TargetType::SYSTEM_LIB) {
-                display_vec<Source>("includes", t->sources, [](const Source &v) { printf("{src: %s, out: %s}", v.source.c_str(), v.output.c_str()); });
+                display_vec<Source>("includes", t->sources, [](const Source &v) { printf("{src: %s, out: %s}", v.src.c_str(), v.out.c_str()); });
             }
             printf(CB_LINE_END);
         }
@@ -1405,87 +1508,89 @@ namespace cb {
         return seed;
     }
 
-    Status Cb::m_on_build_target(Cb &cb) {
-        if (auto callback = cb.callbacks.find("build"); (callback != cb.callbacks.end()) && (callback->second != NULL)) return callback->second(cb);
+    Status Cb::m_on_build_target(Cb *cb) {
+        if (auto c = cb->callbacks.find("build"); (c != cb->callbacks.end() && c->second != nullptr)) {
+            return c->second(cb);
+        }
 
-        for (size_t i = 0; i < cb.targets.size(); i++) {
-            const auto &it = cb.targets[i];
-            mkdir_if_not_exists(it->output_dir);
-            if (TargetType::DYNAMIC_LIB == it->type || it->type == TargetType::DYNAMIC_LIB) {
-                if (it->run(cb.cfg) == Status::ERR) CB_BAIL_ERROR(return Status::ERR, "failed to run target: '%s'", it->name.c_str());
+        for (const auto &tg : cb->targets) {
+            if (tg->type == TargetType::SYSTEM_LIB || tg->type == TargetType::EXEC) continue;
+            mkdir_if_not_exists(tg->output_dir);
+            if (tg->run(cb->cfg) == Status::ERR) CB_BAIL_ERROR(return Status::ERR, "failed to run target: '%s'", tg->name.c_str());
+        }
+
+        for (const auto &tg : cb->targets) {
+            if (tg->type == TargetType::EXEC) {
+                mkdir_if_not_exists(tg->output_dir);
+                if (tg->run(cb->cfg) == Status::ERR) CB_BAIL_ERROR(return Status::ERR, "failed to run target: '%s'", tg->name.c_str());
             }
         }
-        for (size_t i = 0; i < cb.targets.size(); i++) {
-            const auto &it = cb.targets[i];
-            if (it->type == TargetType::EXEC) {
-                if (it->run(cb.cfg) == Status::ERR) CB_BAIL_ERROR(return Status::ERR, "failed to run target: '%s'", it->name.c_str());
-            }
-        }
+
         return Status::OK;
     }
 
-    Status Cb::m_on_config_target(Cb &cb) {
-        if (auto callback = cb.callbacks.find("config"); (callback != cb.callbacks.end()) && (callback->second != NULL))
-            return callback->second(cb);
+    Status Cb::m_on_config_target(Cb *cb) {
+        if (auto callback = cb->callbacks.find("config"); (callback != cb->callbacks.end()) && (callback->second != nullptr))
+            callback->second(cb);
         else {
-            fs::path def_source_path = cb.cfg.project_path;
+            fs::path def_source_path = cb->cfg.project_path;
             def_source_path.append("src");
-            fs::path def_include_path = cb.cfg.project_path;
+            fs::path def_include_path = cb->cfg.project_path;
             def_include_path.append("include");
 
-            auto exec = cb.create_exec(cb.cfg.project_name);
-            exec->add_sources_with_ext(cb.cfg.project_path, program_ext(cb.cfg.program_type), true);
+            auto exec = cb->create_exec(cb->cfg.project_name);
+            exec->add_sources_with_ext(cb->cfg.project_path, program_ext(cb->cfg.program_type), true);
             exec->add_includes(def_include_path);
             exec->add_flags("-Wall", "-Wextra", "-Werror", "-pedantic");
         }
 
-        if (cb.cfg.is_changed()) {
-            if (cb.cfg.save(cb.cfg.config_path) == Status::ERR) CB_BAIL_ERROR(return Status::ERR, "Failed to save config");
-            CB_INFO("(CB) - Saving Configuration to '%s'", cb.cfg.config_path.c_str());
+        if (cb->cfg.is_changed()) {
+            if (cb->cfg.save(cb->cfg.config_path) == Status::ERR) CB_BAIL_ERROR(return Status::ERR, "Failed to save config");
+            CB_INFO("(CB) - Saving Configuration to '%s'", cb->cfg.config_path.c_str());
         }
-        if (cb.is_targets_changed()) {
-            if (cb.save_targets() == Status::ERR) CB_BAIL_ERROR(return Status::ERR, "Failed to save targets");
-            CB_INFO("(CB) - Saving Targets Information to '%s'", cb.cfg.targets_path.c_str());
+        if (cb->is_targets_changed()) {
+            if (cb->save_targets() == Status::ERR) return Status::ERR;
+            CB_INFO("(CB) - Saving Targets Information to '%s'", cb->cfg.targets_path.c_str());
         }
+
+        if (cb->cfg.dump_compile_command) {
+            compile_commands(cb);
+        }
+
         return Status::OK;
     }
 
-    Status Cb::m_on_install_target(Cb &cb) {
-        if (auto callback = cb.callbacks.find("install"); (callback != cb.callbacks.end()) && (callback->second != NULL)) return callback->second(cb);
+    Status Cb::m_on_install_target(Cb *cb) {
+        if (auto callback = cb->callbacks.find("install"); (callback != cb->callbacks.end()) && (callback->second != nullptr)) {
+            return callback->second(cb);
+        }
 
-        if (cb.cfg.install_prefix.empty())
-            CB_BAIL_ERROR(return Status::ERR, "cfg.install_prefix should set to install, set the prefix with `cb_config_set_install_prefix` function");
+        if (cb->cfg.install_prefix.empty()) {
+            CB_BAIL_ERROR(return Status::ERR,
+                                 "cfg.install_prefix should set to install, set the prefix with "
+                                 "`cb_config_set_install_prefix` function");
+        }
 #    ifdef CB_UNIX
-        if (strncmp(cb.cfg.install_prefix.c_str(), "/usr", sizeof("/usr") - 1) == 0)
+        if (cb->cfg.install_prefix.root_path() == "/")
             if (getuid() != 0) CB_BAIL_ERROR(return Status::ERR, "Command install requires Admin Privilages!");
 #    endif
 
         bool result;
-        result = mkdir_if_not_exists(cb.cfg.bin_install_dir);
-        result = mkdir_if_not_exists(cb.cfg.lib_install_dir);
+        result = mkdir_if_not_exists(cb->cfg.bin_install_dir);
+        result = mkdir_if_not_exists(cb->cfg.lib_install_dir);
         if (!result) return Status::ERR;
 
-        auto temp_bin_install_dir = cb.cfg.bin_install_dir;
-        auto temp_lib_install_dir = cb.cfg.lib_install_dir;
-
-        for (size_t i = 0; i < cb.targets.size(); i++) {
-            const auto &tg = cb.targets[i];
-            if (tg->type == TargetType::EXEC) {
-                temp_bin_install_dir.append(tg->name);
-                if (!copy_file(temp_bin_install_dir.c_str(), tg->output.c_str())) return Status::ERR;
-                temp_bin_install_dir = cb.cfg.bin_install_dir;
-            } else if (TargetType::DYNAMIC_LIB == tg->type || tg->type == TargetType::STATIC_LIB) {
-                temp_lib_install_dir.append(tg->name);
-                if (!copy_file(temp_lib_install_dir.c_str(), tg->output.c_str())) return Status::ERR;
-                temp_lib_install_dir = cb.cfg.lib_install_dir;
-            }
+        Status sts = Status::OK;
+        for (const auto &tg : cb->targets) {
+            if (tg->type == TargetType::SYSTEM_LIB) continue;
+            sts &= tg->install(cb->cfg.bin_install_dir);
         }
-        return Status::OK;
+        return sts;
     }
-    Status Cb::m_on_clean_target(Cb &cb) {
-        if (auto callback = cb.callbacks.find("clean"); (callback != cb.callbacks.end()) && (callback->second != NULL)) return callback->second(cb);
+    Status Cb::m_on_clean_target(Cb *cb) {
+        if (auto callback = cb->callbacks.find("clean"); (callback != cb->callbacks.end()) && (callback->second != nullptr)) return callback->second(cb);
 
-        bool is_ok = remove_dir_if_exists(cb.cfg.build_artifact_path);
+        bool is_ok = remove_dir_if_exists(cb->cfg.build_artifact_path);
         if (!is_ok) CB_BAIL_ERROR(return Status::ERR, "Failed to remove directory");
         return Status::OK;
     }
@@ -1498,11 +1603,15 @@ namespace cb {
         if (cfg.subcmd == "build") {
             if (load_targets() == Status::ERR) return Status::ERR;
             CB_INFO("(CB) - Running Build");
-            if (m_on_build_target(*this) == Status::ERR) return Status::ERR;
+            if (m_on_build_target(this) == Status::ERR) return Status::ERR;
+            if (g_display_config) {
+                cfg.serialize(std::cerr);
+                targets_display();
+            }
             CB_INFO("(CB) - Finish Build");
         } else if (cfg.subcmd == "config") {
             CB_INFO("(CB) - Running Configure");
-            if (m_on_config_target(*this) == Status::ERR) return Status::ERR;
+            if (m_on_config_target(this) == Status::ERR) return Status::ERR;
             if (g_display_config) {
                 cfg.serialize(std::cerr);
                 targets_display();
@@ -1511,20 +1620,20 @@ namespace cb {
                 "(CB) - Success Configuring Project, run `build` or `tests` to "
                 "build and run tests");
         } else if (cfg.subcmd == "clean") {
-            if (m_on_clean_target(*this) == Status::ERR) return Status::ERR;
+            if (m_on_clean_target(this) == Status::ERR) return Status::ERR;
         } else if (cfg.subcmd == "install") {
             CB_INFO("(CB) - Running Install");
             cfg.build_type = Build::RELEASE;
 
             if (!is_builded())
-                if (m_on_config_target(*this) == Status::ERR) return Status::ERR;
+                if (m_on_config_target(this) == Status::ERR) return Status::ERR;
             if (!is_configured())
-                if (m_on_build_target(*this) == Status::ERR) return Status::ERR;
+                if (m_on_build_target(this) == Status::ERR) return Status::ERR;
 
-            if (auto cb = callbacks.find("install"); (cb != callbacks.end()) && (cb->second != NULL)) {
-                if ((cb->second)(*this) == Status::ERR) return Status::ERR;
+            if (auto cb = callbacks.find("install"); (cb != callbacks.end()) && (cb->second != nullptr)) {
+                if ((cb->second)(this) == Status::ERR) return Status::ERR;
             } else {
-                if (m_on_install_target(*this) == Status::ERR) return Status::ERR;
+                if (m_on_install_target(this) == Status::ERR) return Status::ERR;
             }
             CB_INFO("(CB) - Success Running Install");
         } else {
@@ -1533,28 +1642,27 @@ namespace cb {
                 targets_display();
             }
             if (auto item = callbacks.find(cfg.subcmd); item != callbacks.end()) {
-                return item->second(*this);
+                return item->second(this);
             }
         }
         return Status::OK;
     }
-    Status Cb::dump_compile_commands() { return Status::OK; }
 
 #    ifdef CB_WINDOWS
     struct Find_Result {
         int      windows_sdk_version;  // Zero if no Windows SDK found.
 
-        wchar_t *windows_sdk_root              = NULL;
-        wchar_t *windows_sdk_um_library_path   = NULL;
-        wchar_t *windows_sdk_ucrt_library_path = NULL;
+        wchar_t *windows_sdk_root              = nullptr;
+        wchar_t *windows_sdk_um_library_path   = nullptr;
+        wchar_t *windows_sdk_ucrt_library_path = nullptr;
 
-        wchar_t *vs_exe_path                   = NULL;
-        wchar_t *vs_library_path               = NULL;
+        wchar_t *vs_exe_path                   = nullptr;
+        wchar_t *vs_library_path               = nullptr;
     };
 
-    Find_Result find_visual_studio_and_windows_sdk();
+    static Find_Result find_visual_studio_and_windows_sdk();
 
-    void        free_resources(Find_Result *result) {
+    static void        free_resources(Find_Result *result) {
         free(result->windows_sdk_root);
         free(result->windows_sdk_um_library_path);
         free(result->windows_sdk_ucrt_library_path);
@@ -1578,12 +1686,12 @@ namespace cb {
 
     fail:
         if (dir) CB_FREE(dir);
-        return NULL;
+        return nullptr;
     }
 
     struct dirent *readdir(DIR *dirp) {
         assert(dirp);
-        if (dirp->dirent == NULL) {
+        if (dirp->dirent == nullptr) {
             dirp->dirent = (struct dirent *)calloc(1, sizeof(struct dirent));
         } else {
             if (!FindNextFile(dirp->hFind, &dirp->data)) {
@@ -1593,7 +1701,7 @@ namespace cb {
                     // https://docs.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror
                     errno = ENOSYS;
                 }
-                return NULL;
+                return nullptr;
             }
         }
         memset(dirp->dirent->d_name, 0, sizeof(dirp->dirent->d_name));
@@ -1648,7 +1756,7 @@ namespace cb {
         wchar_t *best_name;
     };
 
-    bool os_file_exists(wchar_t *name) {
+    static bool os_file_exists(wchar_t *name) {
         // @Robustness: What flags do we really want to check here?
 
         auto attrib = GetFileAttributesW(name);
@@ -1658,7 +1766,7 @@ namespace cb {
         return true;
     }
 
-    wchar_t *concat(wchar_t *a, wchar_t *b, wchar_t *c = nullptr, wchar_t *d = nullptr) {
+    static wchar_t *concat(wchar_t *a, wchar_t *b, wchar_t *c = nullptr, wchar_t *d = nullptr) {
         // Concatenate up to 4 wide strings together. Allocated with malloc.
         // If you don't like that, use a programming language that actually
         // helps you with using custom allocators. Or just edit the code.
@@ -1685,7 +1793,7 @@ namespace cb {
     }
 
     typedef void (*Visit_Proc_W)(wchar_t *short_name, wchar_t *full_name, Version_Data *data);
-    bool         visit_files_w(wchar_t *dir_name, Version_Data *data, Visit_Proc_W proc) {
+    static bool  visit_files_w(wchar_t *dir_name, Version_Data *data, Visit_Proc_W proc) {
         // Visit everything in one folder (non-recursively). If it's a directory
         // that doesn't start with ".", call the visit proc on it. The visit proc
         // will see if the filename conforms to the expected versioning pattern.
@@ -1714,8 +1822,8 @@ namespace cb {
         return true;
     }
 
-    wchar_t *read_from_the_registry(HKEY key, wchar_t *value_name) {
-        // Returns NULL if read failed.
+    static wchar_t *read_from_the_registry(HKEY key, wchar_t *value_name) {
+        // Returns nullptr if read failed.
         // Otherwise returns a wide string allocated via 'malloc'.
 
         //
@@ -1725,19 +1833,20 @@ namespace cb {
         //
 
         DWORD required_length;
-        auto  rc = RegQueryValueExW(key, value_name, NULL, NULL, NULL, &required_length);
-        if (rc != 0) return NULL;
+        auto  rc = RegQueryValueExW(key, value_name, nullptr, nullptr, nullptr, &required_length);
+        if (rc != 0) return nullptr;
 
         wchar_t *value;
         DWORD    length;
         while (1) {
-            length = required_length + 2;  // The +2 is for the maybe optional zero later on. Probably we are over-allocating.
-            value =
-                (wchar_t *)malloc(length + 2);  // This second +2 is for crazy situations where there are race conditions or the API doesn't do what we want!
-            if (!value) return NULL;
+            length = required_length + 2;            // The +2 is for the maybe optional zero later on. Probably we are over-allocating.
+            value  = (wchar_t *)malloc(length + 2);  // This second +2 is for crazy situations where there are race
+                                                     // conditions or the API doesn't do what we want!
+            if (!value) return nullptr;
 
             DWORD type;
-            rc = RegQueryValueExW(key, value_name, NULL, &type, (LPBYTE)value, &length);  // We know that version is zero-terminated...
+            rc = RegQueryValueExW(key, value_name, nullptr, &type, (LPBYTE)value,
+                                  &length);  // We know that version is zero-terminated...
             if (rc == ERROR_MORE_DATA) {
                 free(value);
                 required_length = length;
@@ -1747,7 +1856,7 @@ namespace cb {
             if ((rc != 0) || (type != REG_SZ)) {
                 // REG_SZ because we only accept strings here!
                 free(value);
-                return NULL;
+                return nullptr;
             }
 
             break;
@@ -1757,13 +1866,13 @@ namespace cb {
         // with zero-termination, we need to manually terminate it. Sigh!!
 
         auto num_wchars   = length / 2;
-        value[num_wchars] = 0;  // If the string was already zero-terminated, this just puts an extra 0 after (since that 0 was counted in 'length'). If it
-                                // wasn't, this puts a 0 after the nonzero characters we got.
+        value[num_wchars] = 0;  // If the string was already zero-terminated, this just puts an extra 0 after (since that 0 was counted
+                                // in 'length'). If it wasn't, this puts a 0 after the nonzero characters we got.
 
         return value;
     }
 
-    void win10_best(wchar_t *short_name, wchar_t *full_name, Version_Data *data) {
+    static void win10_best(wchar_t *short_name, wchar_t *full_name, Version_Data *data) {
         // Find the Windows 10 subdirectory with the highest version number.
 
         int  i0, i1, i2, i3;
@@ -1797,7 +1906,7 @@ namespace cb {
         }
     }
 
-    void win8_best(wchar_t *short_name, wchar_t *full_name, Version_Data *data) {
+    static void win8_best(wchar_t *short_name, wchar_t *full_name, Version_Data *data) {
         // Find the Windows 8 subdirectory with the highest version number.
 
         int  i0, i1;
@@ -1821,7 +1930,7 @@ namespace cb {
         }
     }
 
-    void find_windows_kit_root(Find_Result *result) {
+    static void find_windows_kit_root(Find_Result *result) {
         // Information about the Windows 10 and Windows 8 development kits
         // is stored in the same place in the registry. We open a key
         // to that place, first checking preferntially for a Windows 10 kit,
@@ -1871,7 +1980,7 @@ namespace cb {
         // If we get here, we failed to find anything.
     }
 
-    bool find_visual_studio_2017_by_fighting_through_microsoft_craziness(Find_Result *result) {
+    static bool find_visual_studio_2017_by_fighting_through_microsoft_craziness(Find_Result *result) {
         // The name of this procedure is kind of cryptic. Its purpose is
         // to fight through Microsoft craziness. The things that the fine
         // Visual Studio team want you to do, JUST TO FIND A SINGLE FOLDER
@@ -1887,19 +1996,19 @@ namespace cb {
         // If all this COM object instantiation, enumeration, and querying doesn't give us
         // a useful result, we drop back to the registry-checking method.
 
-        auto rc                                       = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+        auto rc                                       = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         // "Subsequent valid calls return false." So ignore false.
         // if rc != S_OK  return false;
 
         GUID                 my_uid                   = {0x42843719, 0xDB4C, 0x46C2, {0x8E, 0x7C, 0x64, 0xF1, 0x81, 0x6E, 0xFD, 0x5B}};
         GUID                 CLSID_SetupConfiguration = {0x177F0C4A, 0x1CD3, 0x4DE7, {0xA3, 0x2C, 0x71, 0xDB, 0xBB, 0x9F, 0xA3, 0x6D}};
 
-        ISetupConfiguration *config                   = NULL;
-        auto                 hr                       = CoCreateInstance(CLSID_SetupConfiguration, NULL, CLSCTX_INPROC_SERVER, my_uid, (void **)&config);
+        ISetupConfiguration *config                   = nullptr;
+        auto                 hr                       = CoCreateInstance(CLSID_SetupConfiguration, nullptr, CLSCTX_INPROC_SERVER, my_uid, (void **)&config);
         if (hr != 0) return false;
         defer { config->Release(); };
 
-        IEnumSetupInstances *instances = NULL;
+        IEnumSetupInstances *instances = nullptr;
         hr                             = config->EnumInstances(&instances);
         if (hr != 0) return false;
         if (!instances) return false;
@@ -1907,7 +2016,7 @@ namespace cb {
 
         while (1) {
             ULONG           found    = 0;
-            ISetupInstance *instance = NULL;
+            ISetupInstance *instance = nullptr;
             auto            hr       = instances->Next(1, &instance, &found);
             if (hr != S_OK) break;
 
@@ -1932,8 +2041,8 @@ namespace cb {
             BOOL          success     = GetFileSizeEx(file_handle, &tools_file_size);
             if (!success) continue;
 
-            auto version_bytes = (tools_file_size.QuadPart + 1) * 2;  // Warning: This multiplication by 2 presumes there is no variable-length encoding in the
-                                                                      // wchars (wacky characters in the file could betray this expectation).
+            auto version_bytes = (tools_file_size.QuadPart + 1) * 2;  // Warning: This multiplication by 2 presumes there is no variable-length encoding
+                                                                      // in the wchars (wacky characters in the file could betray this expectation).
             wchar_t *version   = (wchar_t *)malloc(version_bytes);
             defer { free(version); };
 
@@ -1944,8 +2053,8 @@ namespace cb {
             if (version_tail) *version_tail = 0;  // Stomp the data, because nobody cares about it.
 
             auto library_path = concat(bstr_inst_path, L"\\VC\\Tools\\MSVC\\", version, L"\\lib\\x64");
-            auto library_file = concat(
-                library_path, L"\\vcruntime.lib");  // @Speed: Could have library_path point to this string, with a smaller count, to save on memory flailing!
+            auto library_file = concat(library_path, L"\\vcruntime.lib");  // @Speed: Could have library_path point to this string, with
+                                                                           // a smaller count, to save on memory flailing!
 
             if (os_file_exists(library_file)) {
                 auto link_exe_path      = concat(bstr_inst_path, L"\\VC\\Tools\\MSVC\\", version, L"\\bin\\Hostx64\\x64");
@@ -1956,8 +2065,9 @@ namespace cb {
 
             /*
                Ryan Saunderson said:
-               "Clang uses the 'SetupInstance->GetInstallationVersion' / ISetupHelper->ParseVersion to find the newest version
-               and then reads the tools file to define the tools path - which is definitely better than what i did."
+               "Clang uses the 'SetupInstance->GetInstallationVersion' / ISetupHelper->ParseVersion to find the newest
+               version and then reads the tools file to define the tools path - which is definitely better than what i
+               did."
 
                So... @Incomplete: Should probably pick the newest version...
             */
@@ -1967,7 +2077,7 @@ namespace cb {
         return false;
     }
 
-    void find_visual_studio_by_fighting_through_microsoft_craziness(Find_Result *result) {
+    static void find_visual_studio_by_fighting_through_microsoft_craziness(Find_Result *result) {
         bool found_visual_studio_2017 = find_visual_studio_2017_by_fighting_through_microsoft_craziness(result);
         if (found_visual_studio_2017) return;
 
@@ -2021,17 +2131,31 @@ namespace cb {
 
         return result;
     }
+#    else
+    struct Find_Result {
+        int      windows_sdk_version           = 0;  // Zero if no Windows SDK found.
+        wchar_t *windows_sdk_root              = nullptr;
+        wchar_t *windows_sdk_um_library_path   = nullptr;
+        wchar_t *windows_sdk_ucrt_library_path = nullptr;
+
+        wchar_t *vs_exe_path                   = nullptr;
+        wchar_t *vs_library_path               = nullptr;
+    };
+
+    static Find_Result find_visual_studio_and_windows_sdk() { return Find_Result(); }
+    static void        free_resources(Find_Result *result) { (void)result; }
+
 #    endif  // CB_WINDOWS
 
-    static Status which_exec(const str_t &exec, fs::path &out) {
+    Status which_exec(const Str &exec, fs::path &out) {
         CB_INFO("Searching full path of executable: `%*s`", (int)exec.size(), exec.data());
         out.clear();
 
         char *paths = getenv("PATH");
-        if (paths == NULL) CB_BAIL_ERROR(return Status::ERR, "PATH environment variable not set.\n");
+        if (paths == nullptr) CB_BAIL_ERROR(return Status::ERR, "$PATH environment variable not set.\n");
 
         const char *token;
-        while ((token = strsep(&paths, ":")) != NULL) {
+        while ((token = strsep(&paths, ":")) != nullptr) {
             walkdir(token, false, [&](const fs::path &path) {
                 if (exec.compare(path.filename().c_str()) == 0) {
                     CB_INFO("Found which path: %s", path.c_str());
@@ -2040,8 +2164,13 @@ namespace cb {
                 }
                 return true;
             });
-            if (!out.empty()) return Status::OK;
+            if (!out.empty()) {
+                CB_INFO("Found Program `%s` in $PATH: `%s`", exec.c_str(), out.c_str());
+                return Status::OK;
+            }
         }
+
+        CB_ERROR("Program in $PATH for: `%s` is NotFound", exec.c_str());
         return Status::ERR;
     }
 
@@ -2055,35 +2184,33 @@ namespace cb {
         } while (0)
 
     Status find_compiler(fs::path &compiler_path, const Config &cfg) {
-        if (!compiler_path.empty()) return Status::OK;
-
         Status result = Status::OK;
         switch (cfg.compiler_type) {
-            case Compiler::MSVC:
-#    if CB_WINDOWS
-                Find_Result result = find_visual_studio_and_windows_sdk();
-                if (result->windows_sdk_version) {
-                    compiler_path = result->vs_exe_path;
-                    break;
+            case Compiler::MSVC: {
+                Find_Result msvc_find_result = find_visual_studio_and_windows_sdk();
+                defer { free_resources(&msvc_find_result); };
+
+                if (msvc_find_result.windows_sdk_version > 0 && msvc_find_result.vs_exe_path != nullptr) {
+                    compiler_path = msvc_find_result.vs_exe_path;
+                } else {
+                    result = which_exec("cl", compiler_path);
                 }
-#    endif
-                if (!compiler_path.empty()) break;
+                if (!compiler_path.empty() && result == Status::OK) break;
+            }
                 // fallthrough
-            case Compiler::CLANG:
+            case Compiler::CLANG: {
                 CB_WHICH_COMPILER(compiler_path, "clang", "clang++");
                 if (!compiler_path.empty()) break;
+            }
                 // fallthrough
-            case Compiler::GNU:
-                CB_WHICH_COMPILER(compiler_path, "gcc", "g++");
-                break;
-                // fallthrough
+            case Compiler::GNU: CB_WHICH_COMPILER(compiler_path, "gcc", "g++"); break;
             default: break;
         }
         if (result == Status::ERR || compiler_path.empty()) {
-            CB_INFO("Failed to get program path for: Compiler `%s`", COMPILER_DISPLAY[cfg.compiler_type]);
+            CB_INFO("Failed to get program path for: Compiler `%s`", COMPILER_DISPLAY[cfg.compiler_type].c_str());
             CB_INFO("Trying to get Compiler path from environment variable `PATH`=`CC`");
             char *compiler = getenv("CC");
-            if (compiler == NULL) {
+            if (compiler == nullptr) {
                 CB_INFO("There is no Compiler path from environment variable `PATH`=`CC`");
                 return Status::ERR;
             }
@@ -2091,6 +2218,122 @@ namespace cb {
         }
 
         return Status::OK;
+    }
+
+    struct JsonWriter {
+        JsonWriter(std::ostream &w) : m_writer(w), m_states({State::Root}) {}
+
+        void sep() { m_writer << ','; }
+        void begin_list(const Str &name = "") {
+            m_begin_group(name, '[');
+            m_states.push(State::List);
+        }
+        void end_list() {
+            m_end_group(']');
+            m_states.pop();
+        }
+
+        void begin_object(const Str &name = "") {
+            m_begin_group(name, '{');
+            m_states.push(State::Object);
+        }
+        void end_object() {
+            m_end_group('}');
+            m_states.pop();
+        }
+
+        template <typename T>
+        void item(const T &s, const Str &name = "") {
+            if (m_states.top() == State::Object && !name.empty()) m_writer << '\"' << name << "\":";
+            m_writer << s;
+        }
+        void string(const Str &s, const Str &name = "") {
+            if (m_states.top() == State::Object && !name.empty()) m_writer << '\"' << name << "\":";
+            m_writer << std::quoted(s);
+        }
+
+       private:
+        inline void m_begin_group(const Str &name, char delim) {
+            if (m_states.top() == State::Object && !name.empty()) m_writer << '\"' << name << "\":";
+            m_writer << delim;
+        }
+        inline void   m_end_group(char delim) { m_writer << delim; }
+
+        std::ostream &m_writer;
+        enum class State {
+            Root,
+            List,
+            Object,
+        };
+        enum class Type {
+            None,
+            List,
+            Object,
+            Str,
+            Num,
+        };
+        std::stack<State> m_states;
+    };
+
+    static void source_compile_commands(JsonWriter &jw, const fs::path &dir, const fs::path &compiler, const Source &src, const Vec<Str> &flags) {
+        jw.begin_object();
+        {
+            jw.begin_list("arguments");
+            {
+                jw.item(compiler);
+                jw.sep();
+                for (const auto &flag : flags) {
+                    jw.string(flag);
+                    jw.sep();
+                }
+                jw.string("-c");
+                jw.sep();
+                jw.string("-o");
+                jw.sep();
+                jw.item(src.out);
+                jw.sep();
+                jw.item(src.src);
+            }
+            jw.end_list();
+            jw.sep();
+
+            jw.item(dir, "directory");
+            jw.sep();
+
+            jw.item(src.src, "file");
+            jw.sep();
+
+            jw.item(src.out, "output");
+        }
+        jw.end_object();
+    }
+
+    void compile_commands(Cb *cb) {
+        const fs::path &project_dir   = cb->cfg.project_path;
+        const fs::path &compiler_path = cb->cfg.compiler_path;
+        try {
+            fs::path cmpath = cb->cfg.build_path;
+            cmpath.append("compile_commands.json");
+            std::ofstream out(cmpath);
+            JsonWriter    jw(out);
+            jw.begin_list();
+            for (const auto &target : cb->targets) {
+                if (target->type == TargetType::EXEC || !target->file.src.empty()) {
+                    source_compile_commands(jw, project_dir, compiler_path, target->file, target->flags);
+                }
+                if (!target->sources.empty()) jw.sep();
+
+                for (size_t i = 0; i < target->sources.size(); i++) {
+                    const auto &source = target->sources[i];
+                    source_compile_commands(jw, project_dir, compiler_path, source, target->flags);
+                    if (i != (target->sources.size() - 1)) jw.sep();
+                }
+            }
+            jw.end_list();
+
+        } catch (const std::exception &e) {
+            CB_ERROR("Failed on genereating compile_commands.json");
+        }
     }
 }  // namespace cb
 
