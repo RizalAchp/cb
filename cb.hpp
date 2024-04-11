@@ -1470,7 +1470,7 @@ namespace cb {
     Status Target::add_sources_with_ext(const Str &dir, const char *ext, bool recursive) {
         auto ret =
             walkdir(dir, recursive, [this, ext](const Str &p, __attribute__((unused)) FileType ft) {
-                if (case_cmp(path_extension(p), ext)) this->add_sources(p);
+                if (case_cmp(path_extension(p), ext) && p != this->file.src) this->add_sources(p);
                 return true;
             });
         return ret ? Status::OK : Status::ERR;

@@ -2,7 +2,7 @@
 #define PROJECT_VERSION ${PROJECT_VERSION}
 
 #define CB_IMPLEMENTATION
-#include "cb.hpp"
+#include ${INCLUDE_FILE}
 
 using namespace cb;
 
