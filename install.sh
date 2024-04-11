@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+
+unset PROJECT_NAME
+while [ -z ${PROJECT_NAME} ]; do
+    read -p "Enter Project Name: " PROJECT_NAME
+    [ -z ${PROJECT_NAME} ] && echo "ERROR: Project name is required!";
+done
+
+read -p "Enter Project Version (default=0.1.0): " PROJECT_VERSION
+[ -z ${PROJECT_VERSION} ] && PROJECT_VERSION="0.1.0";
+
+cat ./cb.cpp.template | sed "s/\${PROJECT_NAME}/\"${PROJECT_NAME}\"/g" | sed "s/\${PROJECT_VERSION}/\"${PROJECT_VERSION}\"/g" >> ./cb.cpp
+
+

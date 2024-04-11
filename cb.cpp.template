@@ -1,0 +1,38 @@
+#define PROJECT_NAME ${PROJECT_NAME}
+#define PROJECT_VERSION ${PROJECT_VERSION}
+
+#define CB_IMPLEMENTATION
+#include "cb.hpp"
+
+using namespace cb;
+
+static cb::Status on_configure(cb::Cb *cb) {
+    /// use pkg-config for search installed system library (for example X11 library)
+    //TargetRef x11lib = cb->create_target_pkgconf("X11");
+
+    /// create static or dynamic library
+    //TargetRef lib = cb->create_static_lib(PROJECT_NAME);
+    //TargetRef lib = cb->create_dynamic_lib(PROJECT_NAME);
+
+    /// create executable with main source
+    // TargetRef exec = cb->create_exec(PROJECT_NAME, "src/main.c");
+    
+
+    /// add defines/flags/includes/source for the `TargetRef`
+    //exec.add_defines("-DDEBUG", ...);
+    //exec.add_flags("-Wall", "-Wextra", "-O2", ...);
+    //exec.add_includes("./includes", ...);
+    //exec.add_sources("./src/source.c", ...);
+
+    /// you can link with TargetRef library defined before with exec TargetRef
+    //exec.link_libraries(lib, x11lib)
+
+    return cb::Status::OK;
+}
+
+CB_MAIN {
+    cb::Cb cb(PROJECT_NAME);
+    cb.add_callback("config", on_configure);
+    cb.run(argc, argv);
+    return 0;
+}

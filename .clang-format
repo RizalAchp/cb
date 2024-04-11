@@ -23,7 +23,7 @@ AlignConsecutiveDeclarations: AcrossEmptyLines
 AlignConsecutiveAssignments: AcrossEmptyLinesAndComments
 AllowShortFunctionsOnASingleLine: All
 AllowShortEnumsOnASingleLine: true
-ColumnLimit: '160'
+ColumnLimit: '100'
 IndentPPDirectives: AfterHash
 
 # AlwaysBreakTemplateDeclarations: Yes
